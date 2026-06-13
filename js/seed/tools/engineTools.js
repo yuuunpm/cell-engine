@@ -1,0 +1,739 @@
+/**
+ * 引擎工具注册表 (engineTools.js)
+ *
+ * AI 操作员与基圆引擎之间的桥梁。
+ * 把自然语言描述的操作变成对 CellCore / AiBridge / Sandbox 的实际调用。
+ *
+ * 使用方式：
+ *   EngineTools.init(CellCore, AiBridge, Sandbox, PersistLayer);
+ *   const result = EngineTools.dispatch({ name: 'create_cell', params: { kind: 'plant', x: 0, y: 0 } });
+ */
+
+(function (global) {
+  'use strict';
+
+  const EngineTools = (function () {
+    let _cellCore = null;
+    let _aiBridge = null;
+    let _sandbox = null;
+    let _persistLayer = null;
+    let _initialized = false;
+
+    // ===== 工具定义表 =====
+    // 每个工具包含: description(给人看), usage(给 LLM 看的字符串签名), fn(params) 实现
+    const _tools = {
+      get_world_state: {
+        description: '获取当前世界的摘要：基圆总数、分类数量、游戏时间等',
+        usage: 'get_world_state()',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const cells = _cellCore.getAllCells();
+          const kinds = {};
+          for (let i = 0; i < cells.length; i++) {
+            const k = cells[i].kind || 'unknown';
+            kinds[k] = (kinds[k] || 0) + 1;
+          }
+
+          // 尝试获取时间系统（可能挂在 DevConsole / GameLoop）
+          let timeInfo = null;
+          if (global.DevConsole && typeof global.DevConsole.getGameTime === 'function') {
+            try {
+              timeInfo = global.DevConsole.getGameTime();
+            } catch (e) { /* 忽略 */ }
+          }
+
+          // 尝试获取提供者状态
+          let providers = null;
+          if (_aiBridge && typeof _aiBridge.getProviderStats === 'function') {
+            try { providers = _aiBridge.getProviderStats(); } catch (e) { /* 忽略 */ }
+          }
+
+          return {
+            ok: true,
+            totalCells: cells.length,
+            byKind: kinds,
+            gameTime: timeInfo,
+            fps: (function () {
+              const el = document.getElementById('fpsDisplay');
+              return el && el.textContent ? el.textContent : null;
+            })(),
+            aiProviders: providers
+          };
+        }
+      },
+
+      list_cells: {
+        description: '列出/查询基圆（可选按 kind 过滤）',
+        usage: 'list_cells({ kind, limit, offset })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          let cells = _cellCore.getAllCells();
+          if (p.kind) {
+            cells = cells.filter(function (c) { return c.kind === p.kind; });
+          }
+          const total = cells.length;
+          const limit = typeof p.limit === 'number' ? Math.min(p.limit, 50) : Math.min(total, 50);
+          const offset = typeof p.offset === 'number' ? p.offset : 0;
+          const slice = cells.slice(offset, offset + limit);
+          const items = slice.map(function (c) {
+            return {
+              id: c.id,
+              name: c.name,
+              kind: c.kind,
+              x: (typeof c.x === 'number') ? Math.round(c.x) : null,
+              y: (typeof c.y === 'number') ? Math.round(c.y) : null,
+              radius: c.radius,
+              color: c.color,
+              hasCode: !!(typeof c.code === 'string' && c.code.length > 0),
+              triggerMode: (c.triggerConfig && c.triggerConfig.mode) || null
+            };
+          });
+          return {
+            ok: true,
+            total: total,
+            returned: items.length,
+            cells: items
+          };
+        }
+      },
+
+      create_cell: {
+        description: '创建一个基圆',
+        usage: 'create_cell({ kind, x, y, name, radius, color, attributes })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          const kind = p.kind || 'empty';
+          const x = typeof p.x === 'number' ? p.x : (Math.random() - 0.5) * 200;
+          const y = typeof p.y === 'number' ? p.y : (Math.random() - 0.5) * 200;
+
+          const cell = _cellCore.createCell(kind, x, y);
+          if (!cell) return { ok: false, error: '创建失败' };
+
+          const updates = {};
+          if (typeof p.name === 'string' && p.name.length > 0) updates.name = p.name;
+          if (typeof p.radius === 'number') updates.radius = p.radius;
+          if (typeof p.color === 'string' && p.color.length > 0) updates.color = p.color;
+          if (typeof p.shape === 'string' && p.shape.length > 0) updates.shape = p.shape;
+          if (typeof p.opacity === 'number') updates.opacity = p.opacity;
+
+          let applied = false;
+          if (Object.keys(updates).length > 0) {
+            _cellCore.updateCell(cell.id, updates);
+            applied = true;
+          }
+
+          // attributes（扩展属性，需要单独 setAttribute 调用）
+          const attrs = p.attributes;
+          let setAttr = 0;
+          if (attrs && typeof attrs === 'object') {
+            const keys = Object.keys(attrs);
+            for (let i = 0; i < keys.length; i++) {
+              try {
+                _cellCore.setAttribute(cell.id, keys[i], attrs[keys[i]]);
+                setAttr++;
+              } catch (e) { /* 忽略单项错误 */ }
+            }
+          }
+
+          return {
+            ok: true,
+            cell: {
+              id: cell.id,
+              kind: cell.kind,
+              name: cell.name,
+              x: Math.round(cell.x),
+              y: Math.round(cell.y),
+              radius: cell.radius
+            },
+            appliedPropertyUpdates: applied,
+            attributesSet: setAttr
+          };
+        }
+      },
+
+      update_cell: {
+        description: '修改基圆的属性（name / radius / color 等）',
+        usage: 'update_cell(id, { name, radius, color, shape, opacity })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          const id = p.id;
+          if (!id) return { ok: false, error: '缺少参数 id' };
+          const cell = _cellCore.getCell(id);
+          if (!cell) return { ok: false, error: '未找到基圆 id=' + id };
+
+          const props = {};
+          ['name', 'radius', 'color', 'shape', 'opacity'].forEach(function (k) {
+            if (p[k] !== undefined && p[k] !== null) props[k] = p[k];
+          });
+          if (Object.keys(props).length === 0) {
+            return { ok: true, cell: { id: id, name: cell.name }, appliedCount: 0 };
+          }
+          _cellCore.updateCell(id, props);
+          return { ok: true, cell: { id: id, name: cell.name }, appliedCount: Object.keys(props).length, applied: props };
+        }
+      },
+
+      delete_cell: {
+        description: '删除基圆。可以按 id / kind 或 all:true 清空整个世界',
+        usage: 'delete_cell({ id, kind, all })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          if (p.id) {
+            const existed = _cellCore.getCell(p.id) !== null;
+            if (!existed) return { ok: false, error: '未找到基圆 id=' + p.id };
+            _cellCore.destroyCell(p.id);
+            return { ok: true, removed: 1, by: 'id' };
+          }
+          if (p.kind) {
+            const all = _cellCore.getAllCells();
+            const targets = all.filter(function (c) { return c.kind === p.kind; });
+            for (let i = 0; i < targets.length; i++) _cellCore.destroyCell(targets[i].id);
+            return { ok: true, removed: targets.length, by: 'kind', kind: p.kind };
+          }
+          if (p.all) {
+            const all = _cellCore.getAllCells();
+            for (let i = 0; i < all.length; i++) _cellCore.destroyCell(all[i].id);
+            return { ok: true, removed: all.length, by: 'all' };
+          }
+          return { ok: false, error: 'delete_cell 需要提供 id / kind / all:true 之一' };
+        }
+      },
+
+      set_time_speed: {
+        description: '设置游戏时间流速（0=暂停，1=正常，5=五倍速，最高10）',
+        usage: 'set_time_speed(speed)',
+        fn: function (params) {
+          const p = params || {};
+          const speed = typeof p.speed === 'number' ? p.speed : 1;
+          const fn = global.DevConsole && typeof global.DevConsole.setTimeSpeed === 'function'
+            ? global.DevConsole.setTimeSpeed
+            : null;
+          if (!fn) return { ok: false, error: '时间系统未加载' };
+          fn(speed);
+          return { ok: true, speed: speed };
+        }
+      },
+
+      generate_code_for: {
+        description: '为指定基圆生成行为代码并加载',
+        usage: 'generate_code_for({ cellId, description })',
+        fn: async function (params) {
+          if (!_aiBridge) return { ok: false, error: 'AiBridge 未初始化' };
+          const p = params || {};
+          const cellId = p.cellId || p.cell_id || p.id;
+          const description = p.description || p.desc || '';
+          if (!cellId) return { ok: false, error: '缺少参数 cellId' };
+          if (!description) return { ok: false, error: '缺少代码生成描述 description' };
+
+          try {
+            const code = await _aiBridge.generateCode(cellId, description);
+            _aiBridge.confirmAndLoadCode(cellId, typeof code === 'string' ? code : (code && code.code ? code.code : ''), {});
+            return { ok: true, cellId: cellId, description: description, codeLoaded: true };
+          } catch (e) {
+            return { ok: false, error: e.message || '代码生成失败' };
+          }
+        }
+      },
+
+      list_providers: {
+        description: '列出所有已配置的 AI 提供者（模型）及状态',
+        usage: 'list_providers()',
+        fn: function (params) {
+          if (!_aiBridge) return { ok: false, error: 'AiBridge 未初始化' };
+          let stats = null;
+          if (typeof _aiBridge.getProviderStats === 'function') {
+            try { stats = _aiBridge.getProviderStats(); } catch (e) { /* 忽略 */ }
+          }
+          if (!stats && typeof _aiBridge.getProviders === 'function') {
+            try { stats = _aiBridge.getProviders(); } catch (e) { /* 忽略 */ }
+          }
+          return {
+            ok: true,
+            totalCount: (stats && stats.length) || 0,
+            enabledCount: stats ? stats.filter(function (x) { return x.enabled && x.hasKey; }).length : 0,
+            providers: stats
+          };
+        }
+      },
+
+      test_providers: {
+        description: '对每个已启用的 AI 提供者测速 ping',
+        usage: 'test_providers()',
+        fn: async function (params) {
+          if (!_aiBridge || typeof _aiBridge.benchmarkProviders !== 'function') {
+            return { ok: false, error: 'AiBridge 未初始化或不支持测速' };
+          }
+          try {
+            const results = await _aiBridge.benchmarkProviders({});
+            return { ok: true, results: results };
+          } catch (err) {
+            return { ok: false, error: err.message || String(err) };
+          }
+        }
+      },
+
+      emit_event: {
+        description: '向引擎发射一个事件',
+        usage: 'emit_event({ eventName, data })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          const eventName = p.eventName || p.name;
+          if (!eventName) return { ok: false, error: '缺少参数 eventName' };
+          _cellCore.emit(eventName, p.data || {});
+          return { ok: true, eventName: eventName, data: p.data || null };
+        }
+      },
+
+      // ========== 语义化物种工具 ==========
+
+      create_ant: {
+        description: '创建一只蚂蚁',
+        usage: 'create_ant({ species, role, x, y, name })',
+        fn: function (params) {
+          if (!_cellCore || !_sandbox) return { ok: false, error: 'CellCore/Sandbox 未初始化' };
+          const p = params || {};
+          const role = p.role || 'worker';
+
+          const registry = window.SpeciesRegistry;
+          if (!registry || !registry.getAntBehaviorCode) {
+            return { ok: false, error: 'SpeciesRegistry 未加载' };
+          }
+
+          // 构建中文名→key 反向查找
+          const ants = registry.getAllAnts ? registry.getAllAnts() : {};
+          const nameToKey = {};
+          Object.keys(ants).forEach(function (k) {
+            if (ants[k].name) nameToKey[ants[k].name] = k;
+          });
+
+          let speciesKey = p.species || 'lasius_niger';
+          if (!ants[speciesKey] && nameToKey[speciesKey]) speciesKey = nameToKey[speciesKey];
+
+          const behaviorCode = registry.getAntBehaviorCode(speciesKey, role);
+          if (!behaviorCode) return { ok: false, error: '未知蚂蚁物种: ' + speciesKey + '（可用：' + Object.keys(ants).join(', ') + '）' };
+
+          const x = typeof p.x === 'number' ? p.x : (Math.random() - 0.5) * 200;
+          const y = typeof p.y === 'number' ? p.y : (Math.random() - 0.5) * 200;
+
+          const cell = _cellCore.createCell('creature', x, y);
+          if (!cell) return { ok: false, error: '创建失败' };
+
+          if (typeof p.name === 'string' && p.name.length > 0) {
+            _cellCore.updateCell(cell.id, { name: p.name });
+          }
+
+          _cellCore.setAttribute(cell.id, 'species', speciesKey);
+          _cellCore.setAttribute(cell.id, 'antRole', role);
+          _cellCore.setAttribute(cell.id, 'category', 'ant');
+
+          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'event');
+
+          return {
+            ok: true,
+            cell: { id: cell.id, kind: cell.kind, x: Math.round(x), y: Math.round(y), species: speciesKey, role: role },
+            description: registry.getSpeciesDescription ? registry.getSpeciesDescription(speciesKey, 'ant') : speciesKey
+          };
+        }
+      },
+
+      create_plant: {
+        description: '创建一株植物',
+        usage: 'create_plant({ species, x, y, name })',
+        fn: function (params) {
+          if (!_cellCore || !_sandbox) return { ok: false, error: 'CellCore/Sandbox 未初始化' };
+          const p = params || {};
+
+          const registry = window.SpeciesRegistry;
+          if (!registry || !registry.getPlantBehaviorCode) {
+            return { ok: false, error: 'SpeciesRegistry 未加载' };
+          }
+
+          const plants = registry.getAllPlants ? registry.getAllPlants() : {};
+          const nameToKey = {};
+          Object.keys(plants).forEach(function (k) {
+            if (plants[k].name) nameToKey[plants[k].name] = k;
+          });
+
+          let speciesKey = p.species || 'grass_green';
+          if (!plants[speciesKey] && nameToKey[speciesKey]) speciesKey = nameToKey[speciesKey];
+
+          const behaviorCode = registry.getPlantBehaviorCode(speciesKey);
+          if (!behaviorCode) return { ok: false, error: '未知植物物种: ' + speciesKey + '（可用：' + Object.keys(plants).join(', ') + '）' };
+
+          const x = typeof p.x === 'number' ? p.x : (Math.random() - 0.5) * 200;
+          const y = typeof p.y === 'number' ? p.y : (Math.random() - 0.5) * 200;
+
+          const cell = _cellCore.createCell('plant', x, y);
+          if (!cell) return { ok: false, error: '创建失败' };
+
+          if (typeof p.name === 'string' && p.name.length > 0) {
+            _cellCore.updateCell(cell.id, { name: p.name });
+          }
+
+          _cellCore.setAttribute(cell.id, 'species', speciesKey);
+          _cellCore.setAttribute(cell.id, 'category', 'plant');
+
+          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'event');
+
+          return {
+            ok: true,
+            cell: { id: cell.id, kind: cell.kind, x: Math.round(x), y: Math.round(y), species: speciesKey },
+            description: registry.getSpeciesDescription ? registry.getSpeciesDescription(speciesKey, 'plant') : speciesKey
+          };
+        }
+      },
+
+      create_insect: {
+        description: '创建一只昆虫',
+        usage: 'create_insect({ species, x, y, name })',
+        fn: function (params) {
+          if (!_cellCore || !_sandbox) return { ok: false, error: 'CellCore/Sandbox 未初始化' };
+          const p = params || {};
+
+          const registry = window.SpeciesRegistry;
+          if (!registry || !registry.getInsectBehaviorCode) {
+            return { ok: false, error: 'SpeciesRegistry 未加载' };
+          }
+
+          // 构建中文名→key 的反向查找表
+          const insects = registry.getAllInsects ? registry.getAllInsects() : {};
+          const nameToKey = {};
+          Object.keys(insects).forEach(function (k) {
+            const sp = insects[k];
+            if (sp.name) nameToKey[sp.name] = k;
+          });
+
+          // 解析 species：优先当 key 用，否则反向查找中文名
+          let speciesKey = p.species || 'ladybug';
+          if (!insects[speciesKey]) {
+            // 尝试用中文名查找
+            const foundKey = nameToKey[speciesKey];
+            if (foundKey) speciesKey = foundKey;
+          }
+
+          const behaviorCode = registry.getInsectBehaviorCode(speciesKey);
+          if (!behaviorCode) return { ok: false, error: '未知昆虫物种: ' + speciesKey + '（可用：' + Object.keys(insects).join(', ') + '）' };
+
+          const x = typeof p.x === 'number' ? p.x : (Math.random() - 0.5) * 200;
+          const y = typeof p.y === 'number' ? p.y : (Math.random() - 0.5) * 200;
+
+          const cell = _cellCore.createCell('insect', x, y);
+          if (!cell) return { ok: false, error: '创建失败' };
+
+          if (typeof p.name === 'string' && p.name.length > 0) {
+            _cellCore.updateCell(cell.id, { name: p.name });
+          }
+
+          _cellCore.setAttribute(cell.id, 'species', speciesKey);
+          _cellCore.setAttribute(cell.id, 'category', 'insect');
+
+          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'event');
+
+          return {
+            ok: true,
+            cell: { id: cell.id, kind: cell.kind, x: Math.round(x), y: Math.round(y), species: speciesKey },
+            description: registry.getSpeciesDescription ? registry.getSpeciesDescription(speciesKey, 'insect') : speciesKey
+          };
+        }
+      },
+
+      list_creatures: {
+        description: '查询所有生物（蚂蚁/植物/昆虫），可按种类过滤',
+        usage: 'list_creatures({ category, species, limit, offset })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          let cells = _cellCore.getAllCells();
+
+          // 过滤出有 category 属性的基圆
+          cells = cells.filter(function (c) {
+            return c.attributes && c.attributes.category;
+          });
+
+          if (p.category) {
+            cells = cells.filter(function (c) { return c.attributes.category === p.category; });
+          }
+          if (p.species) {
+            cells = cells.filter(function (c) { return c.attributes.species === p.species; });
+          }
+
+          const total = cells.length;
+          const limit = typeof p.limit === 'number' ? Math.min(p.limit, 50) : Math.min(total, 50);
+          const offset = typeof p.offset === 'number' ? p.offset : 0;
+          const slice = cells.slice(offset, offset + limit);
+
+          const items = slice.map(function (c) {
+            return {
+              id: c.id,
+              name: c.name,
+              category: c.attributes.category,
+              species: c.attributes.species,
+              antRole: c.attributes.antRole || null,
+              x: Math.round(c.x),
+              y: Math.round(c.y),
+              radius: c.radius,
+              color: c.color,
+              hasCode: !!(typeof c.code === 'string' && c.code.length > 0)
+            };
+          });
+
+          return { ok: true, total: total, returned: items.length, creatures: items };
+        }
+      },
+
+      get_species_list: {
+        description: '列出所有可用的物种（按 category）',
+        usage: 'get_species_list({ category })',
+        fn: function (params) {
+          const registry = window.SpeciesRegistry;
+          if (!registry) return { ok: false, error: 'SpeciesRegistry 未加载' };
+          const p = params || {};
+          const rawCat = p.category;
+          // 支持中文类别名
+          const catMap = { '蚂蚁': 'ant', '蚁': 'ant', '植物': 'plant', '草': 'plant', '昆虫': 'insect', '虫': 'insect', '场景': 'scene' };
+          const category = catMap[rawCat] || rawCat;
+          const result = {};
+
+          if (!category || category === 'ant') {
+            const ants = registry.getAllAnts ? registry.getAllAnts() : {};
+            result.ant = Object.keys(ants).map(function (k) {
+              const sp = ants[k];
+              return {
+                key: k,
+                name: sp.name || k,
+                roles: sp.roles ? Object.keys(sp.roles) : []
+              };
+            });
+          }
+          if (!category || category === 'plant') {
+            const plants = registry.getAllPlants ? registry.getAllPlants() : {};
+            result.plant = Object.keys(plants).map(function (k) {
+              const sp = plants[k];
+              return { key: k, name: sp.name || k };
+            });
+          }
+          if (!category || category === 'insect') {
+            const insects = registry.getAllInsects ? registry.getAllInsects() : {};
+            result.insect = Object.keys(insects).map(function (k) {
+              const sp = insects[k];
+              return { key: k, name: sp.name || k };
+            });
+          }
+
+          return { ok: true, species: result };
+        }
+      },
+
+      create_map_scene: {
+        description: '根据自然语言描述创建或切换地图场景（清空世界并生成地形、植物、昆虫等）',
+        usage: 'create_map_scene({ description, preset, clearWorld, density })',
+        fn: function (params) {
+          const p = params || {};
+          const registry = window.SpeciesRegistry;
+          if (!registry || !registry.getMapPresets) {
+            return { ok: false, error: 'SpeciesRegistry 未加载' };
+          }
+
+          const presets = registry.getMapPresets();
+          let presetKey = p.preset || '';
+          const desc = (p.description || '').toLowerCase();
+
+          // 通过自然语言描述智能匹配 preset
+          if (!presetKey && desc) {
+            const aliases = {
+              '沙漠': 'desert', '戈壁': 'desert', '干旱': 'desert', '沙地': 'desert',
+              '草原': 'grassland', '草地': 'grassland', '温带': 'grassland',
+              '森林': 'deciduous', '落叶林': 'deciduous', '阔叶林': 'deciduous', '树林': 'deciduous',
+              '雨林': 'rainforest', '热带雨林': 'rainforest', '热带': 'rainforest',
+              '随机': Object.keys(presets)[Math.floor(Math.random() * Object.keys(presets).length)]
+            };
+            for (const [keyword, key] of Object.entries(aliases)) {
+              if (desc.includes(keyword)) { presetKey = key; break; }
+            }
+          }
+
+          // 尝试精确匹配 preset key
+          if (!presetKey || !presets[presetKey]) {
+            const available = Object.keys(presets).join(', ');
+            return { ok: false, error: '未找到匹配地图，可用: ' + available };
+          }
+
+          const result = registry.buildMapScene(presetKey, {
+            clearWorld: p.clearWorld !== false,
+            density: typeof p.density === 'number' ? p.density : 1.0
+          });
+
+          if (result.error) return { ok: false, error: result.error };
+
+          // 更新画布背景色
+          const preset = presets[presetKey];
+          const canvas = document.getElementById('gameCanvas');
+          if (canvas) canvas.style.background = preset.backgroundColor;
+          document.body.style.background = preset.backgroundColor;
+
+          return {
+            ok: true,
+            preset: presetKey,
+            name: preset.name,
+            background: preset.backgroundColor,
+            summary: '创建了 ' + result.total + ' 个实体（植物 ' + result.plants + ' / 昆虫 ' + result.insects + ' / 地物 ' + (result.rocks + result.waters) + '）'
+          };
+        }
+      }
+
+    };
+
+    // ===== 初始化 =====
+    function init(cellCore, aiBridge, sandbox, persistLayer) {
+      _cellCore = cellCore || (typeof global.CellCore !== 'undefined' ? global.CellCore : null);
+      _aiBridge = aiBridge || (typeof global.AiBridge !== 'undefined' ? global.AiBridge : null);
+      _sandbox = sandbox || (typeof global.Sandbox !== 'undefined' ? global.Sandbox : null);
+      _persistLayer = persistLayer || (typeof global.PersistLayer !== 'undefined' ? global.PersistLayer : null);
+      _initialized = true;
+      return true;
+    }
+
+    function isReady() {
+      return _initialized && !!_cellCore;
+    }
+
+    // ===== 列出所有工具（供 UI 或 LLM 参考） =====
+    function listTools() {
+      const names = Object.keys(_tools);
+      return names.map(function (n) {
+        return {
+          name: n,
+          usage: _tools[n].usage,
+          description: _tools[n].description
+        };
+      });
+    }
+
+    // ===== 解析 __TOOL_CALL__ 标记 =====
+    // 支持两种写法：
+    //   __TOOL_CALL__[{"name":"...","params":{...}}]        （推荐）
+    //   __TOOL_CALL__ [ { "name": "...", "params": {...} } ] （允许空格/换行）
+    // 返回数组 [{ name, params }]；没有标记时返回 null
+    function parseToolCalls(rawText) {
+      if (typeof rawText !== 'string') return null;
+      const idx = rawText.indexOf('__TOOL_CALL__');
+      if (idx === -1) return null;
+
+      // 找到第一个 '['（跳过空格/换行）
+      let start = idx + '__TOOL_CALL__'.length;
+      while (start < rawText.length && /\s/.test(rawText.charAt(start))) start++;
+      if (start >= rawText.length || rawText.charAt(start) !== '[') return null;
+
+      // 找到匹配的 ']'（从 start 起）
+      let depth = 0;
+      let end = -1;
+      let inString = false;
+      let stringChar = '';
+      for (let i = start; i < rawText.length; i++) {
+        const ch = rawText.charAt(i);
+        if (inString) {
+          if (ch === stringChar && rawText.charAt(i - 1) !== '\\') inString = false;
+          continue;
+        }
+        if (ch === '"' || ch === "'") { inString = true; stringChar = ch; continue; }
+        if (ch === '[') depth++;
+        else if (ch === ']') {
+          depth--;
+          if (depth === 0) { end = i; break; }
+        }
+      }
+      if (end === -1) return null;
+
+      const jsonStr = rawText.substring(start, end + 1);
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && typeof parsed === 'object') return [parsed];
+        return null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // ===== 执行单个工具调用 =====
+    // 调用 { name, params }，返回 { ok, ... } 或 Promise<{ ok, ... }>
+    function callOne(call) {
+      if (!call || typeof call.name !== 'string') {
+        return { ok: false, error: '无效的调用格式（缺少 name）' };
+      }
+      const tool = _tools[call.name];
+      if (!tool) {
+        return { ok: false, error: '未知工具: ' + call.name };
+      }
+      try {
+        const result = tool.fn(call.params || {});
+        if (result && typeof result.then === 'function') {
+          return result.then(function (r) {
+            return { tool: call.name, params: call.params, result: r };
+          }).catch(function (err) {
+            return { tool: call.name, params: call.params, ok: false, error: err && err.message ? err.message : String(err) };
+          });
+        }
+        return { tool: call.name, params: call.params, result: result };
+      } catch (e) {
+        return { tool: call.name, params: call.params, ok: false, error: e.message || String(e) };
+      }
+    }
+
+    // ===== 执行一组调用（按顺序） =====
+    async function dispatchAll(calls) {
+      if (!Array.isArray(calls)) calls = [calls];
+      const results = [];
+      for (let i = 0; i < calls.length; i++) {
+        const r = callOne(calls[i]);
+        if (r && typeof r.then === 'function') {
+          results.push(await r);
+        } else {
+          results.push(r);
+        }
+      }
+      return results;
+    }
+
+    // ===== 对外简化入口 =====
+    // dispatch(callOrArray) -> 返回 Promise<Array>；同步调用也包装成 Promise
+    function dispatch(calls) {
+      return Promise.resolve().then(function () { return dispatchAll(calls); });
+    }
+
+    // ===== 简易版本（不返回 Promise） =====
+    function dispatchSync(calls) {
+      if (!Array.isArray(calls)) calls = [calls];
+      const results = [];
+      for (let i = 0; i < calls.length; i++) {
+        const r = callOne(calls[i]);
+        if (r && typeof r.then === 'function') {
+          // 异步工具在同步入口里返回 promise 原样
+          results.push(r);
+        } else {
+          results.push(r);
+        }
+      }
+      return results;
+    }
+
+    return {
+      init: init,
+      isReady: isReady,
+      listTools: listTools,
+      parseToolCalls: parseToolCalls,
+      callOne: callOne,
+      dispatch: dispatch,
+      dispatchSync: dispatchSync
+    };
+  })();
+
+  // 暴露到全局
+  global.EngineTools = EngineTools;
+
+})(typeof window !== 'undefined' ? window : this);
