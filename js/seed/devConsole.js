@@ -1176,8 +1176,13 @@ const DevConsole = (() => {
 
     const systemPrompt =
       toolListStr + '\n' +
-      '\n调用工具格式: __TOOL_CALL__[{name: "...", params:{...}}]\n' +
-      '不需要工具时，用简洁中文回答用户。\n\n' +
+      '\n调用工具格式: __TOOL_CALL__[{"name": "...", "params":{...}}]\n' +
+      '重要规则：\n' +
+      '  1. 如果需要多个步骤（例如：先查物种再创建），每次只输出一批工具调用，不要包含最终答案。\n' +
+      '  2. 引擎执行完工具后会把结果返回给你，你可以根据结果继续调用下一批工具。\n' +
+      '  3. 只有当所有必要的工具都执行完后，再用简洁中文回答用户。\n' +
+      '  4. 创建蚂蚁时，role 可选值: worker(工蚁)、soldier(兵蚁)、queen(蚁后)。\n' +
+      '  5. 可用场景/地图关键词: 随机、草原、雨林、森林、沙漠、雨林、热带雨林。\n\n' +
       '当前世界状态: ' + _getWorldSnapshot();
 
     const messages = [{ role: 'system', content: systemPrompt }];
@@ -1192,52 +1197,61 @@ const DevConsole = (() => {
     messages.push({ role: 'user', content: rawText });
 
     try {
-      const firstResponse = await aiBridge.chat(messages, { taskType: 'chat' });
+      const MAX_TOOL_ROUNDS = 10;
+      let currentMessages = messages.slice();
+      let finalAnswer = null;
+      let anyToolExecuted = false;
 
-      let calls = null;
-      if (engineTools && typeof engineTools.parseToolCalls === 'function') {
-        calls = engineTools.parseToolCalls(firstResponse);
-      } else {
-        const idx = firstResponse.indexOf('__TOOL_CALL__');
-        if (idx !== -1) {
-          try {
-            const jsonPart = firstResponse.substring(idx + '__TOOL_CALL__'.length).trim();
-            const endIdx = jsonPart.indexOf(']');
-            if (endIdx !== -1) {
-              const parsed = JSON.parse(jsonPart.substring(0, endIdx + 1));
-              calls = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : null);
-            }
-          } catch (e) { calls = null; }
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        const aiResponse = await aiBridge.chat(currentMessages, { taskType: 'chat' });
+
+        let calls = null;
+        if (engineTools && typeof engineTools.parseToolCalls === 'function') {
+          calls = engineTools.parseToolCalls(aiResponse);
+        } else {
+          const idx = aiResponse.indexOf('__TOOL_CALL__');
+          if (idx !== -1) {
+            try {
+              const jsonPart = aiResponse.substring(idx + '__TOOL_CALL__'.length).trim();
+              const endIdx = jsonPart.indexOf(']');
+              if (endIdx !== -1) {
+                const parsed = JSON.parse(jsonPart.substring(0, endIdx + 1));
+                calls = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : null);
+              }
+            } catch (e) { calls = null; }
+          }
         }
-      }
 
-      if (!calls || calls.length === 0) {
-        _chatHistory.push({ role: 'assistant', text: firstResponse, time: new Date() });
-        return { type: 'info', text: firstResponse };
-      }
+        if (!calls || calls.length === 0) {
+          finalAnswer = aiResponse;
+          _chatHistory.push({ role: 'assistant', text: aiResponse, time: new Date() });
+          break;
+        }
 
-      _addMessage('info', '🤖 AI 决定调用以下工具:');
-      for (let i = 0; i < calls.length; i++) {
-        const c = calls[i];
-        _addMessage('system', '   • ' + c.name + '(' + (c.params ? JSON.stringify(c.params) : '') + ')');
-      }
+        anyToolExecuted = true;
+        _chatHistory.push({ role: 'assistant', text: aiResponse, time: new Date() });
+        _addMessage('info', '🤖 AI 决定调用以下工具:');
+        for (let i = 0; i < calls.length; i++) {
+          const c = calls[i];
+          _addMessage('system', '   • ' + c.name + '(' + (c.params ? JSON.stringify(c.params) : '') + ')');
+        }
 
-      const toolResults = engineTools ? await engineTools.dispatch(calls) : null;
-      _addMessage('system', '工具执行完成。正在让 AI 总结结果...');
+        const toolResults = engineTools ? await engineTools.dispatch(calls) : null;
+        _addMessage('system', '工具执行完成。继续思考...');
 
-      const secondMessages = messages.concat([
-        { role: 'assistant', content: firstResponse },
-        {
+        currentMessages.push({ role: 'assistant', content: aiResponse });
+        currentMessages.push({
           role: 'user',
           content: '引擎工具执行结果 (JSON):\n' + (typeof toolResults === 'string' ? toolResults : JSON.stringify(toolResults, null, 2)) +
-                    '\n\n请基于此回答用户原始问题: ' + rawText
-        }
-      ]);
+                    '\n\n如需继续操作请再次使用 __TOOL_CALL__ 格式，否则直接用简洁中文回答用户。'
+        });
+      }
 
-      const secondResponse = await aiBridge.chat(secondMessages, { taskType: 'chat' });
-      _chatHistory.push({ role: 'assistant', text: firstResponse, time: new Date() });
-      _chatHistory.push({ role: 'assistant', text: secondResponse, time: new Date() });
-      return { type: 'success', text: secondResponse };
+      if (!finalAnswer) {
+        finalAnswer = '（已达到最大工具调用次数，请检查是否存在死循环。）';
+      }
+
+      return { type: anyToolExecuted ? 'success' : 'info', text: finalAnswer };
     } catch (err) {
       return {
         type: 'error',
