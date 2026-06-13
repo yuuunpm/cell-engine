@@ -3717,6 +3717,62 @@ for (let i = 0; i < 12; i++) {
       nestCount = 1;
     }
 
+    // 3.6 在蚁巢周围生成蚂蚁（工蚁、兵蚁、蚁后）
+    // 模拟一个已经建立的小型蚁群
+    const antSpeciesPool = preset.antSpecies || [];
+    let antCount = 0;
+    if (antSpeciesPool.length > 0 && nestCount > 0) {
+      const colonyAntSpecies = antSpeciesPool[Math.floor(Math.random() * antSpeciesPool.length)];
+      const firstSpecies = ANT_SPECIES[colonyAntSpecies];
+      if (firstSpecies) {
+        const colonyId = 'A';
+        // 根据地图规模调整蚂蚁数量：草原 12只，雨林/落叶林 15只，沙漠 6只
+        const antTargetMap = { grassland: 12, deciduous: 15, rainforest: 20, desert: 6 };
+        const antTarget = Math.round((antTargetMap[presetKey] || 10) * density);
+
+        // 蚁后 1 只
+        const rolesToCreate = [];
+        rolesToCreate.push('queen');
+        // 兵蚁 约 20%
+        for (let i = 0; i < Math.max(1, Math.round(antTarget * 0.2)); i++) rolesToCreate.push('soldier');
+        // 工蚁 约 80%
+        for (let i = 0; i < antTarget - rolesToCreate.length; i++) rolesToCreate.push('worker');
+
+        for (let i = 0; i < rolesToCreate.length; i++) {
+          const roleKey = rolesToCreate[i];
+          const sp = firstSpecies;
+          const role = sp.roles[roleKey];
+          if (!role) continue;
+
+          // 在蚁巢附近随机散布，半径略大于蚁巢半径
+          const angle = (i / rolesToCreate.length) * Math.PI * 2 + Math.random() * 0.5;
+          const dist = 55 + Math.random() * 25;
+          const ax = center.x + Math.cos(angle) * dist;
+          const ay = center.y + Math.sin(angle) * dist;
+
+          const antCode = typeof getAntBehaviorCode === 'function' ? getAntBehaviorCode(colonyAntSpecies, roleKey) : '';
+          const antAttrs = typeof buildAntAttributes === 'function'
+            ? buildAntAttributes(colonyAntSpecies, roleKey, { colonyId: colonyId, generation: 1 })
+            : {};
+
+          const antCell = cc.createCell('creature', ax, ay);
+          if (antCell) {
+            cc.updateCell(antCell.id, {
+              name: sp.name + '·' + role.name,
+              color: role.color || sp.color,
+              radius: sp.size * role.sizeMul,
+              code: antCode,
+              codeMode: 'continuous',
+              attributes: antAttrs,
+              description: (sp.description || '') + '\n[物种ID] ' + colonyAntSpecies
+            });
+            autoLoadBehaviorTargets.push(antCell.id);
+            antCount++;
+          }
+        }
+      }
+    }
+
     // 4. 根据预设生成植物
     const plantSpecies = preset.plantSpecies || [];
     const basePlantCount = Math.round(25 * (preset.foodMultiplier || 1.0) * density);
@@ -3890,7 +3946,8 @@ for (let i = 0; i < 12; i++) {
       waters: waterCount,
       rocks: rockCount,
       nests: nestCount,
-      total: plantCount + treeCount + insectCount + waterCount + rockCount + nestCount,
+      ants: antCount,
+      total: plantCount + treeCount + insectCount + waterCount + rockCount + nestCount + antCount,
       background: preset.backgroundColor,
       description: preset.description,
       autoLoadedBehaviors: autoLoadBehaviorTargets.length
