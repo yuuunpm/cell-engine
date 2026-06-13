@@ -1,0 +1,142 @@
+api.setProperty('kind', 'creature');
+api.setProperty('name', '兔子');
+api.setProperty('color', '#f5e6d3');
+api.setTriggerMode('continuous');
+
+api.setProperty('energy', api.getProperty('energy') || 60);
+api.setProperty('maxEnergy', 100);
+
+api.registerDraw(function(ctx, radius) {
+  ctx.fillStyle = '#f5e6d3';
+  ctx.beginPath();
+  ctx.ellipse(0, 3, radius * 0.8, radius * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.beginPath();
+  ctx.arc(radius * 0.6, -radius * 0.3, radius * 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#f5e6d3';
+  ctx.beginPath();
+  ctx.ellipse(radius * 0.35, -radius * 0.9, radius * 0.12, radius * 0.35, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(radius * 0.85, -radius * 0.9, radius * 0.12, radius * 0.35, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#ffb6c1';
+  ctx.beginPath();
+  ctx.ellipse(radius * 0.35, -radius * 0.95, radius * 0.06, radius * 0.25, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(radius * 0.85, -radius * 0.95, radius * 0.06, radius * 0.25, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.arc(radius * 0.45, -radius * 0.4, radius * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(radius * 0.75, -radius * 0.4, radius * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(radius * 0.47, -radius * 0.42, radius * 0.03, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(radius * 0.77, -radius * 0.42, radius * 0.03, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#ffb6c1';
+  ctx.beginPath();
+  ctx.ellipse(radius * 0.6, -radius * 0.15, radius * 0.08, radius * 0.05, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#f5e6d3';
+  ctx.beginPath();
+  ctx.arc(-radius * 0.5, radius * 0.1, radius * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = '#e8d5c4';
+  ctx.fillRect(radius * 0.2, radius * 0.5, radius * 0.12, radius * 0.4);
+  ctx.fillRect(radius * 0.5, radius * 0.5, radius * 0.12, radius * 0.4);
+});
+
+api.on('onUpdate', function(data) {
+  var dt = data.dt;
+  var energy = api.getProperty('energy') || 0;
+  var maxEnergy = api.getProperty('maxEnergy') || 100;
+  var x = api.getProperty('x');
+  var y = api.getProperty('y');
+  var myRadius = api.getProperty('radius') || 20;
+  
+  var speed = 0.01;
+  energy -= 0.001 * dt;
+  api.setProperty('energy', energy);
+  
+  if (energy <= 0) {
+    api.log('兔子死亡');
+    api.destroyCell(api.cellId);
+    return;
+  }
+  
+  var plants = api.queryCells({ kind: 'plant' });
+  
+  if (plants.length > 0) {
+    var nearestPlant = null;
+    var minDist = Infinity;
+    
+    for (var i = 0; i < plants.length; i++) {
+      var plant = plants[i];
+      var dx = plant.x - x;
+      var dy = plant.y - y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < minDist) {
+        minDist = dist;
+        nearestPlant = plant;
+      }
+    }
+    
+    if (nearestPlant) {
+      var dx = nearestPlant.x - x;
+      var dy = nearestPlant.y - y;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < myRadius + (nearestPlant.radius || 25)) {
+        var plantEnergy = nearestPlant.attributes ? (nearestPlant.attributes.energy || 30) : 30;
+        var eatAmount = 0.005 * dt;
+        var newPlantEnergy = Math.max(0, plantEnergy - eatAmount);
+        
+        api.updateCellAttribute(nearestPlant.id, 'energy', newPlantEnergy);
+        
+        energy += 0.002 * dt;
+        if (energy > maxEnergy) energy = maxEnergy;
+        api.setProperty('energy', energy);
+        
+        api.log('吃植物中... 植物能量: ' + newPlantEnergy.toFixed(1));
+        
+        if (newPlantEnergy <= 0) {
+          api.log('植物吃完了');
+          api.destroyCell(nearestPlant.id);
+        }
+      } else {
+        api.setProperty('x', x + (dx / dist) * speed * dt);
+        api.setProperty('y', y + (dy / dist) * speed * dt);
+      }
+    }
+  } else {
+    if (!api.getProperty('randDir')) {
+      api.setProperty('randDir', Math.random() * Math.PI * 2);
+    }
+    var randDir = api.getProperty('randDir');
+    
+    if (Math.random() < 0.002) {
+      randDir += (Math.random() - 0.5) * 0.5;
+      api.setProperty('randDir', randDir);
+    }
+    
+    api.setProperty('x', x + Math.cos(randDir) * speed * dt * 0.2);
+    api.setProperty('y', y + Math.sin(randDir) * speed * dt * 0.2);
+  }
+});
