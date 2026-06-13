@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>基圆游戏引擎</title>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <!-- 长按菜单 -->
+  <div id="contextMenu" class="context-menu hidden">
+    <div class="menu-item" data-action="create">创建基圆</div>
+    <div class="menu-item" data-action="navigate">导航模式</div>
+    <div class="menu-item" data-action="edit">编辑模式</div>
+  </div>
+  <!-- 属性面板 -->
+  <div id="propertyPanel" class="property-panel hidden">
+    <div class="panel-header">
+      <span class="panel-title">属性</span>
+      <button class="panel-close" id="panelClose">&times;</button>
+    </div>
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="basic">基本</button>
+      <button class="panel-tab" data-tab="ai">AI</button>
+      <button class="panel-tab" data-tab="code">代码</button>
+      <button class="panel-tab" data-tab="ports">端口</button>
+      <button class="panel-tab" data-tab="runner">运行</button>
+    </div>
+    <div class="panel-body" id="panelBody"></div>
+  </div>
+  <!-- AI描述输入 -->
+  <div id="aiInput" class="ai-input hidden">
+    <div class="ai-input-header">
+      <span>描述基圆行为</span>
+      <button class="panel-close" id="aiInputClose">&times;</button>
+    </div>
+    <textarea id="aiDescription" placeholder="用自然语言描述这个基圆的行为..."></textarea>
+    <button id="aiGenerate" class="btn-primary">AI 生成代码</button>
+    <div id="aiCodePreview" class="code-preview hidden">
+      <pre><code id="aiCodeContent"></code></pre>
+      <div class="code-actions">
+        <button id="aiCodeAccept" class="btn-primary">确认加载</button>
+        <button id="aiCodeReject" class="btn-secondary">重新生成</button>
+      </div>
+    </div>
+  </div>
+  <!-- AI提供者配置 -->
+  <div id="providerConfig" class="provider-config hidden">
+    <div class="provider-header">
+      <span>AI 提供者配置</span>
+      <button class="panel-close" id="providerClose">&times;</button>
+    </div>
+    <div class="provider-body" id="providerBody"></div>
+    <button id="addProvider" class="btn-primary">添加提供者</button>
+  </div>
+  <!-- 状态栏 -->
+  <div id="statusBar" class="status-bar">
+    <span id="fpsDisplay">FPS: --</span>
+    <span id="cellCount">基圆: 0</span>
+    <span id="modeDisplay">模式: 正常</span>
+    <button id="btnDevConsole" class="status-btn" title="开发者控制台">💬 控制台</button>
+  </div>
+  <!-- 引导教程 -->
+  <div id="tutorial" class="tutorial hidden">
+    <div class="tutorial-content">
+      <h2 id="tutorialTitle"></h2>
+      <p id="tutorialText"></p>
+      <button id="tutorialNext" class="btn-primary">下一步</button>
+    </div>
+  </div>
+  <!-- 错误提示 -->
+  <div id="errorToast" class="error-toast hidden"></div>
+  <!-- 加载提示 -->
+  <div id="loadingScreen" class="loading-screen">
+    <div class="loading-spinner"></div>
+    <p>基圆引擎加载中...</p>
+  </div>
+
+  <!-- 1. 基础模块（无依赖） -->
+  <script src="js/seed/persistLayer.js"></script>
+  <script src="js/seed/gameLoop.js"></script>
+
+  <!-- 2. 类型定义（所有新模块依赖） -->
+  <script src="js/seed/types/index.js"></script>
+
+  <!-- 3. 端口系统（WireRegistry 依赖） -->
+  <script src="js/seed/ports/Port.js?v=20240610"></script>
+  <script src="js/seed/ports/InputPort.js?v=20240610"></script>
+  <script src="js/seed/ports/OutputPort.js?v=20240610"></script>
+
+  <!-- 4. 线缆注册表 -->
+  <script src="js/seed/wires/WireRegistry.js?v=20240610"></script>
+
+  <!-- 5. 基圆核心（依赖端口和线缆） -->
+  <script src="js/seed/cellCore.js?v=20240610"></script>
+
+  <!-- 5.5 物种注册表（植物/昆虫/多蚁种数据，供属性面板与行为代码使用） -->
+  <script src="js/seed/species.js?v=20240613a"></script>
+
+  <!-- 6. 上下文系统（依赖 CellCore + 端口） -->
+  <script src="js/seed/contexts/CellContext.js?v=20240610"></script>
+  <script src="js/seed/contexts/EngineCellContext.js?v=20240610"></script>
+  <script src="js/seed/contexts/StandaloneCellContext.js?v=20240610"></script>
+
+  <!-- 7. 渲染桥接（依赖 CellCore） -->
+  <script src="js/seed/renderBridge.js?v=20240613a"></script>
+
+  <!-- 8. 输入桥接（依赖 CellCore + RenderBridge） -->
+  <script src="js/seed/inputBridge.js?v=20240610d"></script>
+
+  <!-- 9. 沙箱执行器 -->
+  <script src="js/seed/sandbox.js?v=20240613"></script>
+
+  <!-- 10. 代码映射模块 -->
+  <script src="js/seed/mappers/SegmentMapper.js?v=20240610"></script>
+  <script src="js/seed/mappers/FileMapper.js?v=20240610"></script>
+  <script src="js/seed/mappers/FolderMapper.js?v=20240610"></script>
+  <script src="js/seed/mappers/CodeLoader.js?v=20240610"></script>
+
+  <!-- 11. 独立运行器 -->
+  <script src="js/seed/runners/StandaloneRunner.js?v=20240610"></script>
+
+  <!-- 12. AI 相关 -->
+  <script src="js/seed/aiMemory.js?v=20240611a"></script>
+  <script src="js/seed/aiBridge.js?v=20240611a"></script>
+
+  <!-- 12.5 引擎工具注册表（AI 操作员调用的具体工具） -->
+  <script src="js/seed/tools/engineTools.js?v=20240611a"></script>
+
+  <!-- 13. 开发者控制台 -->
+  <script src="js/seed/devConsole.js?v=20240611a"></script>
+
+  <!-- 14. 启动入口（最后加载，编排所有模块） -->
+  <script src="js/seed/loader.js?v=20240611a"></script>
+</body>
+</html>
