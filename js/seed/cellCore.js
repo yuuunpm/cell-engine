@@ -890,13 +890,38 @@ const CellCore = (() => {
                   } else if (dist < minOverlapDist && dist > 0) {
                     const nx = distX / dist;
                     const ny = distY / dist;
-                    const push = (minOverlapDist - dist) / 2;
-                    cellA.x += nx * push;
-                    cellA.y += ny * push;
-                    cellB.x -= nx * push;
-                    cellB.y -= ny * push;
-                    _markDirty(idA);
-                    _markDirty(idB);
+                    const totalPush = minOverlapDist - dist;
+
+                    // ===== 不可移动判定 =====
+                    // 静态物(石头/水塘/蚁巢) 和 植物 不可被推动
+                    const Aimmovable = (cellA.kind === 'static' || cellA.kind === 'plant' ||
+                                        (cellA.attributes && cellA.attributes.immovable));
+                    const Bimmovable = (cellB.kind === 'static' || cellB.kind === 'plant' ||
+                                        (cellB.attributes && cellB.attributes.immovable));
+
+                    // ===== 根据移动性分配推力 =====
+                    if (Aimmovable && Bimmovable) {
+                      // 两者都不可动 → 不做物理分离
+                    } else if (Aimmovable) {
+                      // A 不可动 → 只把 B 推离 A
+                      cellB.x -= nx * totalPush;
+                      cellB.y -= ny * totalPush;
+                      _markDirty(idB);
+                    } else if (Bimmovable) {
+                      // B 不可动 → 只把 A 推离 B
+                      cellA.x += nx * totalPush;
+                      cellA.y += ny * totalPush;
+                      _markDirty(idA);
+                    } else {
+                      // 两者都可动 → 均分推力（原逻辑）
+                      const halfPush = totalPush / 2;
+                      cellA.x += nx * halfPush;
+                      cellA.y += ny * halfPush;
+                      cellB.x -= nx * halfPush;
+                      cellB.y -= ny * halfPush;
+                      _markDirty(idA);
+                      _markDirty(idB);
+                    }
                   }
                 }
 
