@@ -292,12 +292,12 @@
       // ========== 语义化物种工具 ==========
 
       create_ant: {
-        description: '创建一只蚂蚁',
-        usage: 'create_ant({ species, role, x, y, name })',
+        description: '创建一只蚂蚁（自动加载行为代码：觅食+躲避+移动）',
+        usage: 'create_ant({ species, role, x, y, name, colonyId })',
         fn: function (params) {
           if (!_cellCore || !_sandbox) return { ok: false, error: 'CellCore/Sandbox 未初始化' };
           const p = params || {};
-          const role = p.role || 'worker';
+          const roleKey = p.role || 'worker';
 
           const registry = window.SpeciesRegistry;
           if (!registry || !registry.getAntBehaviorCode) {
@@ -314,29 +314,52 @@
           let speciesKey = p.species || 'lasius_niger';
           if (!ants[speciesKey] && nameToKey[speciesKey]) speciesKey = nameToKey[speciesKey];
 
-          const behaviorCode = registry.getAntBehaviorCode(speciesKey, role);
-          if (!behaviorCode) return { ok: false, error: '未知蚂蚁物种: ' + speciesKey + '（可用：' + Object.keys(ants).join(', ') + '）' };
+          const sp = ants[speciesKey];
+          if (!sp) return { ok: false, error: '未知蚂蚁物种: ' + speciesKey + '（可用：' + Object.keys(ants).join(', ') + '）' };
+
+          const role = sp.roles && sp.roles[roleKey] ? sp.roles[roleKey] : null;
+          if (!role) return { ok: false, error: '未知角色: ' + roleKey + '（可用：' + Object.keys(sp.roles).join(', ') + '）' };
+
+          const behaviorCode = registry.getAntBehaviorCode(speciesKey, roleKey);
+          if (!behaviorCode) return { ok: false, error: '无法加载蚂蚁行为代码' };
 
           const x = typeof p.x === 'number' ? p.x : (Math.random() - 0.5) * 200;
           const y = typeof p.y === 'number' ? p.y : (Math.random() - 0.5) * 200;
+          const colonyId = p.colonyId || 'A';
+
+          // 丰富属性（用于属性面板中的"第二页：物种科普"）
+          const antAttrs = (typeof registry.buildAntAttributes === 'function')
+            ? registry.buildAntAttributes(speciesKey, roleKey, { colonyId: colonyId, generation: 1 })
+            : {};
+          // 额外字段（兼容 getAntRoles/getSpeciesDescription 的调用）
+          antAttrs.species = speciesKey;
+          antAttrs.antId = antAttrs.antId || 'ant_' + Math.floor(Math.random() * 1e9).toString(36);
+          antAttrs.antRole = roleKey;
+          antAttrs.category = 'ant';
+          antAttrs.colonyId = colonyId;
 
           const cell = _cellCore.createCell('creature', x, y);
           if (!cell) return { ok: false, error: '创建失败' };
 
-          if (typeof p.name === 'string' && p.name.length > 0) {
-            _cellCore.updateCell(cell.id, { name: p.name });
-          }
+          // 将代码写入基圆（让代码页可查看）并指定 continuous 模式作为默认
+          const updates = {
+            name: (typeof p.name === 'string' && p.name.length > 0) ? p.name : sp.name + '·' + role.name,
+            color: role.color || sp.color,
+            radius: sp.size * role.sizeMul,
+            code: behaviorCode,
+            codeMode: 'continuous',
+            attributes: antAttrs,
+            description: (sp.description || '') + '\n[物种ID] ' + speciesKey
+          };
+          _cellCore.updateCell(cell.id, updates);
 
-          _cellCore.setAttribute(cell.id, 'species', speciesKey);
-          _cellCore.setAttribute(cell.id, 'antRole', role);
-          _cellCore.setAttribute(cell.id, 'category', 'ant');
-
-          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'event');
+          // 沙箱实际执行
+          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'continuous');
 
           return {
             ok: true,
-            cell: { id: cell.id, kind: cell.kind, x: Math.round(x), y: Math.round(y), species: speciesKey, role: role },
-            description: registry.getSpeciesDescription ? registry.getSpeciesDescription(speciesKey, 'ant') : speciesKey
+            cell: { id: cell.id, kind: cell.kind, x: Math.round(x), y: Math.round(y), species: speciesKey, role: roleKey, colonyId: colonyId },
+            description: (typeof registry.getSpeciesDescription === 'function') ? registry.getSpeciesDescription(speciesKey, 'ant') : sp.name
           };
         }
       },
@@ -582,7 +605,8 @@
             name: preset.name,
             background: preset.backgroundColor,
             nests: result.nests || 0,
-            summary: '创建了 ' + result.total + ' 个实体（植物 ' + result.plants + ' / 昆虫 ' + result.insects + ' / 地物 ' + (result.rocks + result.waters) + (result.nests ? ' / 蚁巢 ' + result.nests : '') + '）'
+            ants: result.ants || 0,
+            summary: '创建了 ' + result.total + ' 个实体（植物 ' + result.plants + ' / 昆虫 ' + result.insects + ' / 地物 ' + (result.rocks + result.waters) + (result.nests ? ' / 蚁巢 ' + result.nests : '') + (result.ants ? ' / 蚂蚁 ' + result.ants : '') + '）'
           };
         }
       },
