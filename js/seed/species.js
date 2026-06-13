@@ -3635,7 +3635,7 @@ for (let i = 0; i < 12; i++) {
     }
     if (!radius) radius = 1000;
 
-    let plantCount = 0, insectCount = 0, treeCount = 0, waterCount = 0, rockCount = 0;
+    let plantCount = 0, insectCount = 0, treeCount = 0, waterCount = 0, rockCount = 0, nestCount = 0;
     // 收集已生成的圆形占用（用于避免重叠）
     const _occupied = [];
     // 预填充：从 CellCore 读取已有 cell 的位置和半径
@@ -3689,6 +3689,33 @@ for (let i = 0; i < 12; i++) {
       _occupied.push({ x, y, radius: r || 15 });
     }
     const autoLoadBehaviorTargets = [];
+
+    // 3.5 在中心创建蚁巢（整个蚁群的核心）
+    // 注：先把蚁巢位置加入占用，避免植物/昆虫生成时覆盖中心
+    _recordOccupy(center.x, center.y, 60);
+    const nestCode = typeof getSceneObjectBehaviorCode === 'function' ? getSceneObjectBehaviorCode('nest') : '';
+    const nestCell = cc.createCell('static', center.x, center.y);
+    if (nestCell) {
+      cc.updateCell(nestCell.id, {
+        name: '蚁巢',
+        color: '#8b5a2b',
+        radius: 40,
+        shape: 'circle',
+        code: nestCode,
+        codeMode: 'continuous',
+        attributes: {
+          type: 'nest',
+          sceneType: 'nest',
+          isNest: true,
+          colonyId: 'A',
+          foodStorage: 0,
+          population: 0
+        },
+        description: '蚁群的家：工蚁在此存储食物，兵蚁在此回血休整。'
+      });
+      autoLoadBehaviorTargets.push(nestCell.id);
+      nestCount = 1;
+    }
 
     // 4. 根据预设生成植物
     const plantSpecies = preset.plantSpecies || [];
@@ -3862,7 +3889,8 @@ for (let i = 0; i < 12; i++) {
       insects: insectCount,
       waters: waterCount,
       rocks: rockCount,
-      total: plantCount + treeCount + insectCount + waterCount + rockCount,
+      nests: nestCount,
+      total: plantCount + treeCount + insectCount + waterCount + rockCount + nestCount,
       background: preset.backgroundColor,
       description: preset.description,
       autoLoadedBehaviors: autoLoadBehaviorTargets.length
