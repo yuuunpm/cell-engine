@@ -581,7 +581,54 @@
             preset: presetKey,
             name: preset.name,
             background: preset.backgroundColor,
-            summary: '创建了 ' + result.total + ' 个实体（植物 ' + result.plants + ' / 昆虫 ' + result.insects + ' / 地物 ' + (result.rocks + result.waters) + '）'
+            nests: result.nests || 0,
+            summary: '创建了 ' + result.total + ' 个实体（植物 ' + result.plants + ' / 昆虫 ' + result.insects + ' / 地物 ' + (result.rocks + result.waters) + (result.nests ? ' / 蚁巢 ' + result.nests : '') + '）'
+          };
+        }
+      },
+
+      create_nest: {
+        description: '创建一个蚁巢（作为整个蚁群的核心），可指定位置和名称',
+        usage: 'create_nest({ x, y, name, colonyId })',
+        fn: function (params) {
+          if (!_cellCore) return { ok: false, error: 'CellCore 未初始化' };
+          const p = params || {};
+          const registry = window.SpeciesRegistry;
+
+          const nestCode = (registry && typeof registry.getSceneObjectBehaviorCode === 'function')
+            ? registry.getSceneObjectBehaviorCode('nest')
+            : '';
+
+          const x = typeof p.x === 'number' ? p.x : 0;
+          const y = typeof p.y === 'number' ? p.y : 0;
+
+          const cell = _cellCore.createCell('static', x, y);
+          if (!cell) return { ok: false, error: '创建失败' };
+
+          _cellCore.updateCell(cell.id, {
+            name: p.name || '蚁巢',
+            color: '#8b5a2b',
+            radius: 40,
+            shape: 'circle',
+            code: nestCode,
+            codeMode: 'continuous',
+            attributes: {
+              type: 'nest',
+              sceneType: 'nest',
+              isNest: true,
+              colonyId: p.colonyId || 'A',
+              foodStorage: 0,
+              population: 0
+            }
+          });
+
+          if (_sandbox && typeof _sandbox.loadBehaviorCode === 'function') {
+            try { _sandbox.loadBehaviorCode(cell.id, nestCode, 'continuous'); } catch (e) { /* 忽略 */ }
+          }
+
+          return {
+            ok: true,
+            cell: { id: cell.id, kind: cell.kind, x: Math.round(x), y: Math.round(y), colonyId: p.colonyId || 'A' }
           };
         }
       }
