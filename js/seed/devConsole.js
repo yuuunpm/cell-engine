@@ -407,6 +407,11 @@ const DevConsole = (() => {
       return _showHelp();
     }
 
+    // ============== 2.1 创建蚁后（玩家专属命令：create_queen / 创建一只蚁后） ==============
+    if (/(create_queen|创建.*蚁后|生成蚁后|召唤蚁后|放一只蚁后|召唤女王|蚁后)/.test(text)) {
+      return _createQueen(rawText);
+    }
+
     // ============== 2. 建造地图场景（优先级高于普通"地图"查询）==============
     // 识别: "建一张沙漠地图"、"生成草原场景"、"切换到雨林"、"重建落叶林地图" 等
     if (/(^|[\s，。,、])(建|生成|创建|重建|切换|换|布置)(一张|一整个|整个|一个|新的)?[\s，。,、]*(沙漠|戈壁|草原|草地|落叶林|森林|雨林|热带雨林|落叶阔叶林|温带草原|地图|场景)(地图)?/.test(rawText) ||
@@ -1445,6 +1450,84 @@ const DevConsole = (() => {
       _cellCore.createCell('default', x, y);
     }
     return { type: 'success', text: '已创建 ' + count + ' 个基圆' };
+  }
+
+  // ========== 创建蚁后（玩家命令：create_queen / 创建一只蚁后） ==========
+  function _createQueen(rawText) {
+    if (!_cellCore) return { type: 'error', text: 'CellCore 未初始化' };
+    const center = _getCenterPosition();
+    // 在相机中心附近创建蚁后（略微偏移）
+    const qx = center.x + (Math.random() - 0.5) * 40;
+    const qy = center.y + (Math.random() - 0.5) * 40;
+
+    // 获取蚁后行为代码
+    const sr = window.SpeciesRegistry;
+    let queenBehavior = '';
+    if (sr && typeof sr.getAntBehaviorCode === 'function') {
+      queenBehavior = sr.getAntBehaviorCode('lasius_niger', 'queen');
+    }
+
+    // 创建蚁后基圆
+    const cell = _cellCore.createCell('creature', qx, qy);
+    if (!cell) return { type: 'error', text: '创建蚁后失败' };
+
+    // 蚁后外观：比普通蚂蚁大得多，深棕色/金黄
+    _cellCore.updateCell(cell.id, {
+      name: '蚁后（正在探索）',
+      color: '#5c3a0a',
+      radius: 8,
+      kind: 'creature',
+      code: queenBehavior || _getDefaultQueenBehavior(),
+      codeMode: 'continuous',
+      attributes: {
+        antId: true,
+        queenId: true,
+        role: 'queen',
+        colonyId: 'A',
+        species: 'lasius_niger',
+        speed: 0.5,
+        hp: 50,
+        maxHp: 50,
+        energy: 150,
+        initialized: false,
+        queenState: 'explore',
+        exploreTimer: 0,
+        direction: Math.random() * Math.PI * 2,
+        layTimer: 0,
+        digestTimer: 0,
+        buildTimer: 0,
+        nestX: qx,
+        nestY: qy
+      }
+    });
+
+    // 视口跟随到蚁后位置
+    if (typeof window.RenderBridge !== 'undefined' &&
+        typeof window.RenderBridge.setCamera === 'function') {
+      window.RenderBridge.setCamera({ x: qx, y: qy });
+    }
+
+    return {
+      type: 'success',
+      text: '🐜 已创建一只蚁后（黑褐林蚁）！\n' +
+            '位置: (' + Math.round(qx) + ', ' + Math.round(qy) + ')\n' +
+            '视口已跟随到蚁后位置。\n\n' +
+            '阶段1：探索（寻找敌人少+植物多的区域）\n' +
+            '阶段2：消化（停留消耗能量准备建巢）\n' +
+            '阶段3：建造蚁巢（静态基圆）\n' +
+            '阶段4：安居蚁巢，按食物存量产工蚁/兵蚁\n\n' +
+            '⚠️ 天敌昆虫会避开蚁巢范围（60px内不进入），\n' +
+            '   但蚁后在建巢前暴露在外，可能被攻击！'
+    };
+  }
+
+  function _getDefaultQueenBehavior() {
+    // 若 SpeciesRegistry 暂时不可用，使用最简探索行为
+    return 'let d = api.getProperty("direction") || 0;\n' +
+           'if (api.getFrame() % 120 === 0) d += (Math.random() - 0.5) * 0.3;\n' +
+           'api.setProperty("direction", d);\n' +
+           'const spd = 0.5;\n' +
+           'api.setPosition(api.getX() + Math.cos(d)*spd, api.getY() + Math.sin(d)*spd);\n';
   }
 
   function _aiGenerate(rawText) {
