@@ -466,7 +466,7 @@
       '\n' +
       'let dx = 0, dy = 0;\n' +
       'const spd = api.getProperty("speed") || 0.7;\n' +
-      'const state = api.getProperty("state") || "idle";\n' +
+      'const state = api.getProperty("antState") || "idle";\n' +
       'let nestX = api.getProperty("nestX") || 0;\n' +
       'let nestY = api.getProperty("nestY") || 0;\n' +
       '// 如果找到了巢穴基圆，以它为目标\n' +
@@ -477,11 +477,11 @@
       '// 状态切换\n' +
       'if (state === "idle") {\n' +
       '  if ((api.getProperty("energy") || 100) > 60) {\n' +
-      '    api.setProperty("state", "foraging");\n' +
+      '    api.setProperty("antState", "foraging");\n' +
       '  }\n' +
       '} else if (state === "foraging") {\n' +
       '  if (carried >= maxCarry) {\n' +
-      '    api.setProperty("state", "returning");\n' +
+      '    api.setProperty("antState", "returning");\n' +
       '  }\n' +
       '} else if (state === "returning") {\n' +
       '  const distToNest = Math.hypot(api.getX() - nestX, api.getY() - nestY);\n' +
@@ -499,14 +499,14 @@
       '    }\n' +
       '    // 从巢穴拿能量\n' +
       '    api.setProperty("energy", Math.min(100, (api.getProperty("energy") || 100) + 30));\n' +
-      '    api.setProperty("state", "idle");\n' +
+      '    api.setProperty("antState", "idle");\n' +
       '  }\n' +
       '}\n' +
       '\n' +
       '// 决策与移动\n' +
       'if (nearestHostile) {\n' +
       '  dx = api.getX() - nearestHostile.x; dy = api.getY() - nearestHostile.y;\n' +
-      '} else if (api.getProperty("state") === "returning") {\n' +
+      '} else if (api.getProperty("antState") === "returning") {\n' +
       '  dx = nestX - api.getX(); dy = nestY - api.getY();\n' +
       '} else if (nearestFood && carried < maxCarry) {\n' +
       '  dx = nearestFood.x - api.getX(); dy = nearestFood.y - api.getY();\n' +
@@ -813,7 +813,7 @@
       '  api.setProperty("colonyId", "A");  // 所属蚁群（不同群为敌对）\n' +
       '  api.setProperty("direction", Math.random() * Math.PI * 2);\n' +
       '  // 角色分工状态\n' +
-      '  api.setProperty("state", "idle");\n' +
+      '  api.setProperty("antState", "idle");\n' +
       '  api.setProperty("foodCarried", 0);\n' +
       '  api.setProperty("nestX", api.getX());\n' +
       '  api.setProperty("nestY", api.getY());\n' +
