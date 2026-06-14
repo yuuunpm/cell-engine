@@ -543,7 +543,6 @@
       'const spd = api.getProperty("speed") || 0.7;\n' +
       'const hp = api.getProperty("hp") || 30;\n' +
       'const maxHp = api.getProperty("maxHp") || ' + sp.hp + ';\n' +
-      'const myColony = api.getProperty("colonyId") || "A";\n' +
       '\n' +
       'if (nearestHostile) {\n' +
       '  // 有敌人 → 追击并战斗\n' +
