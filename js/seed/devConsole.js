@@ -1474,7 +1474,6 @@ const DevConsole = (() => {
     const qy = center.y + (Math.random() - 0.5) * 40;
 
     // 获取蚁后行为代码
-    const sr = window.SpeciesRegistry;
     let queenBehavior = '';
     if (sr && typeof sr.getAntBehaviorCode === 'function') {
       queenBehavior = sr.getAntBehaviorCode('lasius_niger', 'queen');
