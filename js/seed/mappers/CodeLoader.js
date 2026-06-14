@@ -63,15 +63,15 @@
       const { lineCount, complexityScore } = this._analyzeCodeComplexity(codeStr);
 
       let autoMode;
-      // 复杂度极高（>300行 或 复杂嵌套）→ 文件夹模式
-      if (lineCount > 300 || complexityScore > 8) {
+      // 复杂度极高（>1000行 或 复杂度>9）→ 文件夹模式
+      if (lineCount > 1000 || complexityScore > 9) {
         autoMode = Types.CodeMappingMode.FOLDER;
       }
-      // 中等复杂度（50-300行 或 中等嵌套）→ 文件模式
+      // 中等以上复杂度（>50行 或 复杂度>4）→ 文件模式
       else if (lineCount > 50 || complexityScore > 4) {
         autoMode = Types.CodeMappingMode.FILE;
       }
-      // 简单代码（<50行）→ 片段模式
+      // 简单代码（≤50行）→ 片段模式
       else {
         autoMode = Types.CodeMappingMode.SEGMENT;
       }
