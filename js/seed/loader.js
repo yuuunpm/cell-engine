@@ -1034,7 +1034,7 @@ const Loader = (() => {
         const lines = code.split('\n').filter(l => l.trim().length > 0);
         const lineCount = lines.length;
         let score = 0;
-        if (lineCount > 300) score = 3;
+        if (lineCount > 1000) score = 3;
         else if (lineCount > 50) score = 2;
         else if (lineCount > 0) score = 1;
         return { score, lines: lineCount };
