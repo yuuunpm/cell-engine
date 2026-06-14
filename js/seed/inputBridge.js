@@ -406,13 +406,14 @@ const InputBridge = (() => {
 
   function _onDragStart(x, y) {
     if (_currentMode === MODE_EDIT) {
-      // 编辑模式：使用 pointerDown 时记录的命中基圆，而非当前位置重新 hitTest
+      // 编辑模式：使用 pointerDown 时记录的命中基圆
+      // 【关键】只设置 dragCellId 用于移动基圆，不调用 _selectCell
+      // 这样拖动基圆时不会打开属性面板，只有真正的 tap 单击才会打开
       const startHitId = _touchState._startHitCellId;
       if (startHitId) {
         const hitCell = _cellCore.getCell(startHitId);
         if (hitCell && hitCell.selectable) {
           _touchState.dragCellId = hitCell.id;
-          _selectCell(hitCell.id);
         }
       }
     }
@@ -423,8 +424,8 @@ const InputBridge = (() => {
     const dx = x - _touchState.lastX;
     const dy = y - _touchState.lastY;
 
-    if (_currentMode === MODE_NAVIGATE || (!_touchState.dragCellId && _currentMode !== MODE_EDIT)) {
-      // 导航模式或正常模式空白区域：平移视口
+    if (_currentMode === MODE_NAVIGATE || !_touchState.dragCellId) {
+      // 导航模式 / 任意模式下未抓到拖拽的基圆：平移视口
       _renderBridge.panCamera(dx, dy);
     } else if (_touchState.dragCellId) {
       // 编辑模式：移动基圆（只要是可选的基圆都可以移动）
