@@ -4120,7 +4120,7 @@ for (let i = 0; i < 12; i++) {
     }
     if (!radius) radius = 1000;
 
-    let plantCount = 0, insectCount = 0, treeCount = 0, waterCount = 0, rockCount = 0, nestCount = 0;
+    let plantCount = 0, insectCount = 0, treeCount = 0, waterCount = 0, rockCount = 0, nestCount = 0, antCount = 0;
     // 收集已生成的圆形占用（用于避免重叠）
     const _occupied = [];
     // 预填充：从 CellCore 读取已有 cell 的位置和半径
