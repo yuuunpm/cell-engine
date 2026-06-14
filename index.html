@@ -97,8 +97,14 @@
   <!-- 5. 基圆核心（依赖端口和线缆） -->
   <script src="js/seed/cellCore.js?v=20260614h"></script>
 
-  <!-- 5.5 物种注册表（植物/昆虫/多蚁种数据，供属性面板与行为代码使用） -->
-  <script src="js/seed/species.js?v=20260614k"></script>
+  <!-- 5.5 物种注册表（拆分为 5 个模块 + 1 个汇总层）
+         加载顺序: core -> ant -> plant -> insect -> scene -> species -->
+  <script src="js/seed/species_core.js"></script>
+  <script src="js/seed/species_ant.js"></script>
+  <script src="js/seed/species_plant.js"></script>
+  <script src="js/seed/species_insect.js"></script>
+  <script src="js/seed/species_scene.js"></script>
+  <script src="js/seed/species.js?v=20260615"></script>
 
   <!-- 6. 上下文系统（依赖 CellCore + 端口） -->
   <script src="js/seed/contexts/CellContext.js?v=20240610"></script>
