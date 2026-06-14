@@ -432,6 +432,7 @@
           antAttrs.layTimer = 0;
           antAttrs.digestTimer = 0;
           antAttrs.buildTimer = 0;
+          antAttrs.exploreTimer = 0;
           antAttrs.nestX = qx;
           antAttrs.nestY = qy;
 
