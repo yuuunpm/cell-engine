@@ -1027,25 +1027,47 @@ const Loader = (() => {
     html += '<div class="prop-group">';
     html += '<div class="prop-group-title">行为代码';
     if (!isBuiltInEngine) {
+      // 计算代码复杂度（用于显示提示）
+      const _countLines = (code) => code ? code.split('\n').filter(l => l.trim().length > 0).length : 0;
+      const _analyzeComplexity = (code) => {
+        if (!code) return { score: 0, lines: 0 };
+        const lines = code.split('\n').filter(l => l.trim().length > 0);
+        const lineCount = lines.length;
+        let score = 0;
+        if (lineCount > 300) score = 3;
+        else if (lineCount > 50) score = 2;
+        else if (lineCount > 0) score = 1;
+        return { score, lines: lineCount };
+      };
+      const { score: hintScore, lines: hintLines } = _analyzeComplexity(cell.code || '');
+      const hintLabel = hintScore === 3 ? '建议文件夹模式' : hintScore === 2 ? '建议文件模式' : hintScore === 1 ? '片段模式合适' : '';
       html += `
         <div style="float:right;font-size:11px;margin-top:2px">
           代码模式:
           <select id="codeModeSelect" style="font-size:11px;padding:2px">
-            <option value="segment" ${(cell.codeMode || 'segment') === 'segment' ? 'selected' : ''}>片段模式</option>
-            <option value="file" ${(cell.codeMode || 'segment') === 'file' ? 'selected' : ''}>文件模式</option>
-            <option value="folder" ${(cell.codeMode || 'segment') === 'folder' ? 'selected' : ''}>文件夹模式</option>
+            <option value="segment" ${(cell.codeMode || 'segment') === 'segment' ? 'selected' : ''}>片段</option>
+            <option value="file" ${(cell.codeMode || 'segment') === 'file' ? 'selected' : ''}>文件</option>
+            <option value="folder" ${(cell.codeMode || 'segment') === 'folder' ? 'selected' : ''}>文件夹</option>
           </select>
+          ${hintLabel ? `<span style="color:#888;margin-left:4px" title="智能推断：${hintLines}行">ℹ️${hintLabel}</span>` : ''}
         </div>`;
     }
     html += '</div>';
     html += `<textarea class="code-editor" id="codeEditor" spellcheck="false" ${isBuiltInEngine ? 'disabled' : ''}>${_escapeHtml(cell.code || '')}</textarea>`;
 
-    // 代码状态
-    const statusClass = cell.state === 'error' ? 'has-error' : '';
-    const statusText = cell.state === 'error'
-      ? `错误: ${cell.errorInfo || '未知'}`
-      : cell.code ? '代码已加载' : '暂无代码';
-    html += `<div class="code-status ${statusClass}">${statusText}</div>`;
+    // 代码状态（错误信息可复制）
+    if (cell.state === 'error') {
+      const errorText = cell.errorInfo || '未知错误';
+      html += `<div class="code-status has-error" id="errorStatusBox" data-error="${_escapeHtml(errorText)}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <pre style="flex:1;margin:0;white-space:pre-wrap;word-break:break-all;font-family:monospace;font-size:11px;user-select:text;">❌ 错误: ${_escapeHtml(errorText)}</pre>
+          <button class="btn-secondary" id="copyErrorBtn" style="white-space:nowrap;font-size:11px;padding:2px 6px;">📋 复制</button>
+        </div>
+      </div>`;
+    } else {
+      const statusText = cell.code ? '代码已加载' : '暂无代码';
+      html += `<div class="code-status">${statusText}</div>`;
+    }
 
     if (!isBuiltInEngine) {
       html += '<div style="display:flex;gap:8px;margin-top:10px">';
@@ -1080,6 +1102,38 @@ const Loader = (() => {
     const stopBtn = document.getElementById('codeStopBtn');
     const findBtn = document.getElementById('codeFindBtn');
     const editor = document.getElementById('codeEditor');
+    const copyErrorBtn = document.getElementById('copyErrorBtn');
+
+    if (copyErrorBtn && !copyErrorBtn.dataset.bound) {
+      copyErrorBtn.dataset.bound = '1';
+      copyErrorBtn.addEventListener('click', () => {
+        const errBox = document.getElementById('errorStatusBox');
+        const errText = errBox ? errBox.dataset.error : '';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(errText).then(
+            () => _showToast('已复制到剪贴板'),
+            () => _fallbackCopy(errText)
+          );
+        } else {
+          _fallbackCopy(errText);
+        }
+        function _fallbackCopy(text) {
+            try {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+              _showToast('已复制到剪贴板');
+            } catch (_) {
+              _showToast('复制失败，请手动选中复制');
+            }
+          }
+      });
+    }
 
     if (saveBtn && editor && !saveBtn.dataset.bound) {
       saveBtn.dataset.bound = '1';
