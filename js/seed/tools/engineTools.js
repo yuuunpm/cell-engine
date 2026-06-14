@@ -364,6 +364,110 @@
         }
       },
 
+      create_queen: {
+        description: '创建一只蚁后（自动加载探索→建巢→产蚁的完整行为代码，视口会跟随到蚁后位置）。蚁后会寻找安全区域建巢，按食物存量产下工蚁和兵蚁。',
+        usage: 'create_queen({ species, x, y, colonyId })',
+        fn: function (params) {
+          if (!_cellCore || !_sandbox) return { ok: false, error: 'CellCore/Sandbox 未初始化' };
+          const p = params || {};
+
+          const registry = window.SpeciesRegistry;
+          if (!registry || !registry.getAntBehaviorCode) {
+            return { ok: false, error: 'SpeciesRegistry 未加载' };
+          }
+
+          const ants = registry.getAllAnts ? registry.getAllAnts() : {};
+
+          let speciesKey = p.species || 'lasius_niger';
+          if (!ants[speciesKey]) {
+            const nameToKey = {};
+            Object.keys(ants).forEach(function (k) {
+              if (ants[k].name) nameToKey[ants[k].name] = k;
+            });
+            if (nameToKey[speciesKey]) speciesKey = nameToKey[speciesKey];
+          }
+
+          const sp = ants[speciesKey];
+          if (!sp) return { ok: false, error: '未知蚂蚁物种: ' + speciesKey };
+
+          const queenRole = sp.roles && sp.roles.queen ? sp.roles.queen : null;
+          if (!queenRole) {
+            const availableSpecies = Object.keys(ants).filter(function (k) {
+              return ants[k].roles && ants[k].roles.queen;
+            });
+            return { ok: false, error: speciesKey + ' 没有蚁后角色，可选: ' + availableSpecies.join(', ') };
+          }
+
+          const behaviorCode = registry.getAntBehaviorCode(speciesKey, 'queen');
+          if (!behaviorCode) return { ok: false, error: '无法加载蚁后行为代码' };
+
+          let qx = typeof p.x === 'number' ? p.x : 0;
+          let qy = typeof p.y === 'number' ? p.y : 0;
+          if (typeof p.x !== 'number' && typeof p.y !== 'number') {
+            qx = (Math.random() - 0.5) * 40;
+            qy = (Math.random() - 0.5) * 40;
+          }
+          const colonyId = p.colonyId || 'A';
+
+          const cell = _cellCore.createCell('creature', qx, qy);
+          if (!cell) return { ok: false, error: '创建失败' };
+
+          const antAttrs = (typeof registry.buildAntAttributes === 'function')
+            ? registry.buildAntAttributes(speciesKey, 'queen', { colonyId: colonyId, generation: 0 })
+            : {};
+          antAttrs.species = speciesKey;
+          antAttrs.antId = antAttrs.antId || 'queen_' + colonyId + '_' + Math.floor(Math.random() * 1e9).toString(36);
+          antAttrs.antRole = 'queen';
+          antAttrs.category = 'ant';
+          antAttrs.colonyId = colonyId;
+          antAttrs.queenId = true;
+          antAttrs.queenState = antAttrs.queenState || 'explore';
+          antAttrs.isQueen = true;
+          antAttrs.speed = antAttrs.speed || 0.5;
+          antAttrs.energy = antAttrs.energy || 150;
+          antAttrs.maxEnergy = antAttrs.maxEnergy || 300;
+          antAttrs.hp = antAttrs.hp || 50;
+          antAttrs.maxHp = antAttrs.maxHp || 50;
+          antAttrs.direction = Math.random() * Math.PI * 2;
+          antAttrs.layTimer = 0;
+          antAttrs.digestTimer = 0;
+          antAttrs.buildTimer = 0;
+          antAttrs.nestX = qx;
+          antAttrs.nestY = qy;
+
+          _cellCore.updateCell(cell.id, {
+            name: '蚁后（' + (sp.name || speciesKey) + '）',
+            color: queenRole.color || '#5c3a0a',
+            radius: (sp.size || 5) * (queenRole.sizeMul || 1.6),
+            code: behaviorCode,
+            codeMode: 'continuous',
+            attributes: antAttrs
+          });
+
+          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'continuous');
+
+          if (typeof window.RenderBridge !== 'undefined' &&
+              typeof window.RenderBridge.setCamera === 'function') {
+            window.RenderBridge.setCamera({ x: qx, y: qy });
+          }
+
+          return {
+            ok: true,
+            cell: { id: cell.id, kind: cell.kind, x: Math.round(qx), y: Math.round(qy), species: speciesKey, role: 'queen', colonyId: colonyId },
+            message: '🐜 已创建一只蚁后（' + (sp.name || speciesKey) + '）！\n' +
+                     '位置: (' + Math.round(qx) + ', ' + Math.round(qy) + ')\n' +
+                     '视口已跟随。蚁后将：\n' +
+                     '  阶段1：探索（寻找敌人少+植物多的区域）\n' +
+                     '  阶段2：消化（停留消耗能量准备建巢）\n' +
+                     '  阶段3：建造蚁巢（静态基圆）\n' +
+                     '  阶段4：安居蚁巢，按 foodStorage 产工蚁/兵蚁\n\n' +
+                     '💡 提示：先建一张地图（沙漠/草原/雨林），再创建蚁后。\n' +
+                     '⚠️ 天敌昆虫会避开蚁巢范围（60px内不进入），\n' +
+                     '   但蚁后在建巢前暴露在外，可能被攻击！'
+          };
+        }
+      },
+
       create_plant: {
         description: '创建一株植物',
         usage: 'create_plant({ species, x, y, name })',
