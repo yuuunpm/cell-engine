@@ -285,24 +285,11 @@
       '    qDy = api.getY() - nearestHostile.y;\n' +
       '    api.setProperty("exploreTimer", 0);  // 敌人在附近，重新计时\n' +
       '  } else {\n' +
-      '    // 2) 向植物多的方向走（希望找到食物充足的安全区）\n' +
-      '    let plantTarget = null, plantDist = Infinity;\n' +
-      '    for (let i = 0; i < nearby.length; i++) {\n' +
-      '      const n = nearby[i];\n' +
-      '      if (n.kind === "plant" || (n.attributes && (n.attributes.type === "grass" || n.attributes.type === "herb" || n.attributes.type === "tree" || n.attributes.type === "seed" || n.attributes.type === "mushroom"))) {\n' +
-      '        const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
-      '        if (d < plantDist) { plantDist = d; plantTarget = n; }\n' +
-      '      }\n' +
-      '    }\n' +
-      '    if (plantTarget && plantDist < 150) {\n' +
-      '      qDx = plantTarget.x - api.getX();\n' +
-      '      qDy = plantTarget.y - api.getY();\n' +
-      '    } else {\n' +
-      '      // 3) 没目标：随机漫游\n' +
-      '      if (api.getFrame() % 60 === 0) qDir += (Math.random() - 0.5) * 0.3;\n' +
-      '      qDx = Math.cos(qDir); qDy = Math.sin(qDir);\n' +
-      '      api.setProperty("direction", qDir);\n' +
-      '    }\n' +
+      '    // 2) 随机漫游（蚁后在开阔地寻找安全地点建巢）\n' +
+      '    // 随机漫游\n' +
+      '    if (api.getFrame() % 60 === 0) qDir += (Math.random() - 0.5) * 0.3;\n' +
+      '    qDx = Math.cos(qDir); qDy = Math.sin(qDir);\n' +
+      '    api.setProperty("direction", qDir);\n' +
       '  }\n' +
       '\n' +
       '  const qMv = Math.sqrt(qDx*qDx + qDy*qDy) || 1;\n' +
@@ -313,8 +300,16 @@
       '  if (nearestHostile) qTimer = 0;\n' +
       '  api.setProperty("exploreTimer", qTimer);\n' +
       '\n' +
-      '  // 满足建巢条件：停留足够久 + 能量 >= 100\n' +
-      '  if (qTimer > 600 && (api.getProperty("energy") || 100) >= 100) {\n' +
+      '  // 满足建巢条件：停留足够久 + 能量 >= 100 + 附近无植物（开阔地）
+      '  let nearPlant = false;
+      '  for (let i = 0; i < nearby.length; i++) {
+      '    const n = nearby[i];
+      '    if (n.kind === "plant" || (n.attributes && (n.attributes.type === "grass" || n.attributes.type === "herb" || n.attributes.type === "tree" || n.attributes.type === "seed" || n.attributes.type === "mushroom"))) {
+      '      const d = Math.hypot(n.x - api.getX(), n.y - api.getY());
+      '      if (d < 100) { nearPlant = true; break; }
+      '    }
+      '  }
+      '  if (qTimer > 600 && (api.getProperty("energy") || 100) >= 100 && !nearPlant) {\n' +
       '    api.setProperty("queenState", "digesting");\n' +
       '    api.setProperty("digestTimer", 0);\n' +
       '  }\n' +
@@ -392,14 +387,44 @@
       '  let qNestY = api.getProperty("nestY") || api.getY();\n' +
       '  if (qNestEntity) { qNestX = qNestEntity.x; qNestY = qNestEntity.y; }\n' +
       '\n' +
-      '  // 2) 严格固定在巢中心 8px 内\n' +
-      '  const qCx = api.getX() - qNestX;\n' +
-      '  const qCy = api.getY() - qNestY;\n' +
-      '  const qCDist = Math.sqrt(qCx*qCx + qCy*qCy) || 1;\n' +
-      '  if (qCDist > 8) {\n' +
-      '    api.setPosition(qNestX + qCx / qCDist * 8, qNestY + qCy / qCDist * 8);\n' +
-      '  }\n' +
-      '\n' +
+      '  // 2) 蚁后基本待在巢里，只有快饿死了才出去觅食（符合现实逻辑）
+'  const qEnergy = api.getProperty("energy") || 100;
+'  
+'  // 快饿死了（能量<30）才外出觅食，吃饱后立即回巢
+'  if (qEnergy < 30) {
+'    // 外出觅食状态
+'    let foodTarget = null, foodDist = Infinity;
+'    for (let i = 0; i < nearby.length; i++) {
+'      const n = nearby[i];
+'      if (n.kind === "plant" || (n.attributes && (n.attributes.seedEnergy > 0 || n.attributes.energyValue > 0))) {
+'        const d = Math.hypot(n.x - api.getX(), n.y - api.getY());
+'        if (d < foodDist) { foodDist = d; foodTarget = n; }
+'      }
+'    }
+'    if (foodTarget) {
+'      // 向食物移动
+'      const fDx = foodTarget.x - api.getX();
+'      const fDy = foodTarget.y - api.getY();
+'      const fMv = Math.sqrt(fDx*fDx + fDy*fDy) || 1;
+'      const fSpd = api.getProperty("speed") || 0.5;
+'      api.setPosition(api.getX() + fDx/fMv * fSpd, api.getY() + fDy/fMv * fSpd);
+'    } else {
+'      // 没找到食物，随机漫游
+'      if (api.getFrame() % 60 === 0) {
+'        const ang = Math.random() * Math.PI * 2;
+'        api.setProperty("direction", ang);
+'      }
+'      const dir = api.getProperty("direction") || 0;
+'      const rSpd = (api.getProperty("speed") || 0.5) * 0.5;
+'      api.setPosition(api.getX() + Math.cos(dir) * rSpd, api.getY() + Math.sin(dir) * rSpd);
+'    }
+'  } else if (qEnergy > 60 && qCDist > 5) {
+'    // 能量充足且在巢外时，慢慢走回巢（不急）
+'    const rSpd = (api.getProperty("speed") || 0.5) * 0.3;
+'    api.setPosition(api.getX() - qCx/qCDist * rSpd, api.getY() - qCy/qCDist * rSpd);
+'  }
+'  // 能量在30-60之间时在巢附近小范围活动
+' +
       '  // 3) 根据蚁巢食物存量决定产卵速度\n' +
       '  //    foodStorage 低(<20): 停产(7200帧) → 危机\n' +
       '  //    foodStorage 中(20-80): 正常(3600帧) → 稳定\n' +
