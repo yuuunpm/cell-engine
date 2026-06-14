@@ -341,7 +341,17 @@
       '  if (qBT > 600) {\n' +
       '    // 在当前位置创建蚁巢基圆\n' +
       '    const qColony = api.getProperty("colonyId") || "A";\n' +
-      '    const nestDrawCode = "api.registerDraw(function(ctx, r) { " + "const cx = 0, cy = 0; " + "ctx.fillStyle = \"#5a3a1a\"; " + "ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); " + "ctx.fillStyle = \"#8b5a2b\"; " + "ctx.beginPath(); ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2); ctx.fill(); " + "ctx.fillStyle = \"#3a2a1a\"; " + "ctx.beginPath(); ctx.arc(cx, cy, r * 0.3, 0, Math.PI * 2); ctx.fill(); " + "ctx.fillStyle = \"#2a1a0a\"; " + "ctx.beginPath(); ctx.arc(cx, cy, r * 0.15, 0, Math.PI * 2); ctx.fill(); " + "});";\n' +
+      '    const nestDrawCode = \'api.registerDraw(function(ctx, r) { \' +\n' +
+      '      \'const cx = 0, cy = 0; \' +\n' +
+      '      \'ctx.fillStyle = "#5a3a1a"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.fillStyle = "#8b5a2b"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.fillStyle = "#3a2a1a"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r * 0.3, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.fillStyle = "#2a1a0a"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r * 0.15, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'});\'\n' +
       '    api.createCell({\n' +
       '      kind: "static",\n' +
       '      x: api.getX(),\n' +
