@@ -488,8 +488,8 @@
       '        \'} else if (foeA && aCarried === 0) { \' +\n' +
       '        \'  adxA = api.getX() - foeA.x; adyA = api.getY() - foeA.y;  // 空手被追 → 逃跑 \' +\n' +
       '        \'} else if (aCarried > 0) { \' +\n' +
-      '        \'  adxA = (api.getProperty("nestX") || 0) - api.getX(); adyA = (api.getProperty("nestY") || 0) - api.getY(); \' +\n' +
-      '        \'  // 到巢边：交付食物\n' +
+      '        \'  adxA = (api.getProperty("nestX") || 0) - api.getX(); adyA = (api.getProperty("nestY") || 0) - api.getY(); api.setProperty("nestX", api.getX()); api.setProperty("nestY", api.getY()); \' +\n' +
+      '        \'  /* 到巢边：交付食物 */\' +\n' +
       '        \'  const distToNest2 = Math.sqrt(adxA*adxA + adyA*adyA); \' +\n' +
       '        \'  if (distToNest2 < 45) { \' +\n' +
       '        \'    api.setProperty("foodCarried", 0); \' +\n' +
