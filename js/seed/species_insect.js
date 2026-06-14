@@ -288,7 +288,7 @@
         '    chaseX = targetCell2.x; chaseY = targetCell2.y;\n' +
         '    const ndx = chaseX - api.getX(), ndy = chaseY - api.getY();\n' +
         '    const nd = Math.hypot(ndx, ndy) || 1;\n' +
-        '    api.moveTo(api.getX() + (ndx/nd) * speed, api.getY() + (ndy/nd) * speed);\n' +
+        '    api.setPosition(api.getX() + (ndx/nd) * speed, api.getY() + (ndy/nd) * speed);\n' +
         '    // 攻击范围检测\n' +
         '    if (nd < 15 && api.getFrame() % 30 < 3) {\n' +
         '      try {\n' +
@@ -305,7 +305,7 @@
         '      api.setProperty("direction", Math.random() * Math.PI * 2);\n' +
         '    }\n' +
         '    const nd2 = api.getProperty("direction") || 0;\n' +
-        '    api.moveTo(api.getX() + Math.cos(nd2) * speed, api.getY() + Math.sin(nd2) * speed);\n' +
+        '    api.setPosition(api.getX() + Math.cos(nd2) * speed, api.getY() + Math.sin(nd2) * speed);\n' +
         '  }\n' +
         '} else {\n' +
         '  // 无目标时随机漫游\n' +
@@ -313,7 +313,7 @@
         '    api.setProperty("direction", Math.random() * Math.PI * 2);\n' +
         '  }\n' +
         '  const nd3 = api.getProperty("direction") || 0;\n' +
-        '  api.moveTo(api.getX() + Math.cos(nd3) * speed, api.getY() + Math.sin(nd3) * speed);\n' +
+        '  api.setPosition(api.getX() + Math.cos(nd3) * speed, api.getY() + Math.sin(nd3) * speed);\n' +
         '}\n' +
         '\n';
     } else {
@@ -351,7 +351,7 @@
         '}\n' +
         '\n' +
         '// 移动\n' +
-        'api.moveTo(api.getX() + Math.cos(dir) * speed, api.getY() + Math.sin(dir) * speed);\n' +
+        'api.setPosition(api.getX() + Math.cos(dir) * speed, api.getY() + Math.sin(dir) * speed);\n' +
         '\n';
     }
 
