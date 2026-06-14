@@ -442,6 +442,45 @@
       '  else if (attr.seedEnergy > 0 || attr.energyValue > 0) nearestFood = nearestFood || n;\n' +
       '}\n' +
       '\n' +
+      '// --- 扫描附近信息素标记（同群同伴留下）---\n' +
+      'let pheromoneHint = null;\n' +
+      'let pheroCount = 0;\n' +
+      'for (let i = 0; i < nearby.length; i++) {\n' +
+      '  const np = nearby[i];\n' +
+      '  if (np.attributes && np.attributes.pheromone && np.attributes.colonyId === myColony) {\n' +
+      '    pheroCount++;\n' +
+      '    if (!pheromoneHint || (np.attributes.strength || 0) > (pheromoneHint.attributes ? (pheromoneHint.attributes.strength || 0) : 0)) {\n' +
+      '      pheromoneHint = np;\n' +
+      '    }\n' +
+      '  }\n' +
+      '}\n' +
+      '\n' +
+      '// --- 通用：信息素释放（留一条可被同伴跟随的轨迹）---\n' +
+      '// 用法：api.setProperty("emitPheromone", true) 即表示当前帧需要在当前位置释放一个\n' +
+      'if (api.getProperty("emitPheromone") && api.getFrame() % 45 === 0) {\n' +
+      '  api.createCell({\n' +
+      '    kind: "effect",\n' +
+      '    x: api.getX(),\n' +
+      '    y: api.getY(),\n' +
+      '    name: "信息素",\n' +
+      '    color: "#ffcc66",\n' +
+      '    radius: 3,\n' +
+      '    attributes: { pheromone: true, colonyId: myColony, strength: 100, isPheromone: true },\n' +
+      '    code: "if (!api.getProperty(\\"_pInit\\")) { api.setProperty(\\"_pInit\\", true); api.setProperty(\\"strength\\", 100); }\\n" +\n' +
+      '          "if (api.getFrame() % 60 === 0) {\\n" +\n' +
+      '          "  let s = (api.getProperty(\\"strength\\") || 100) - 2;\\n" +\n' +
+      '          "  api.setProperty(\\"strength\\", s);\\n" +\n' +
+      '          "  api.setRadius(Math.max(1.2, 3 * s / 100));\\n" +\n' +
+      '          "  if (s <= 0) { api.destroyCell(api.getProperty(\\"id\\")); }\\n" +\n' +
+      '          "}\\n" +\n' +
+      '          "if (api.getFrame() % 60 === 30) {\\n" +\n' +
+      '          "  api.updateCellAttribute(api.getProperty(\\"id\\"), \\"strength\\", api.getProperty(\\"strength\\") || 0);\\n" +\n' +
+      '          "}\\n",\n' +
+      '    mode: "continuous"\n' +
+      '  });\n' +
+      '  api.setProperty("emitPheromone", false);\n' +
+      '}\n' +
+      '\n' +
       '// ========== 饱食度消耗 ==========\n' +
       'if (api.getFrame() % 600 === 0) {\n' +
       '  api.setProperty("energy", Math.max(0, (api.getProperty("energy") || 100) - 1));\n' +
@@ -452,9 +491,9 @@
       '}\n' +
       '\n';
 
-    // ------ 工蚁：觅食循环 ------（idle → foraging → returning → idle）
+    // ------ 工蚁：觅食循环 + 信息素引导同伴 ------
     const workerCode =
-      '// ========== 工蚁行为：觅食循环 ==========\n' +
+      '// ========== 工蚁行为：觅食循环（含信息素引导）==========\n' +
       '// 寻找巢穴基圆（isNest=true）\n' +
       'let nestEntity = null;\n' +
       'for (let i = 0; i < nearby.length; i++) {\n' +
@@ -482,23 +521,21 @@
       '} else if (state === "foraging") {\n' +
       '  if (carried >= maxCarry) {\n' +
       '    api.setProperty("antState", "returning");\n' +
+      '    api.setProperty("emitPheromone", true);  // 开始沿途释放信息素\n' +
       '  }\n' +
       '} else if (state === "returning") {\n' +
       '  const distToNest = Math.hypot(api.getX() - nestX, api.getY() - nestY);\n' +
+      '  // 回巢途中：沿途释放信息素（每 45 帧一次，见 sharedCode 里的释放逻辑）\n' +
+      '  api.setProperty("emitPheromone", true);\n' +
       '  if (distToNest < 20) {\n' +
-      '    // 到达巢穴，卸粮\n' +
       '    if (carried > 0 && nestEntity && nestEntity.id) {\n' +
-      '      // 通过全局接口给巢穴增加粮食存储\n' +
-      '      if (window.CellCore && window.CellCore.setAttribute) {\n' +
-      '        const cur = (nestEntity.attributes && nestEntity.attributes.foodStorage) || 0;\n' +
-      '        window.CellCore.setAttribute(nestEntity.id, "foodStorage", cur + carried);\n' +
-      '      }\n' +
+      '      api.updateCellAttribute(nestEntity.id, "foodStorage", ((nestEntity.attributes && nestEntity.attributes.foodStorage) || 0) + carried);\n' +
       '      api.setProperty("foodCarried", 0);\n' +
       '    } else {\n' +
       '      api.setProperty("foodCarried", 0);\n' +
       '    }\n' +
-      '    // 从巢穴拿能量\n' +
       '    api.setProperty("energy", Math.min(100, (api.getProperty("energy") || 100) + 30));\n' +
+      '    api.setProperty("emitPheromone", false);\n' +
       '    api.setProperty("antState", "idle");\n' +
       '  }\n' +
       '}\n' +
@@ -514,11 +551,14 @@
       '  if (foodDist < 15 && api.getFrame() % 120 === 0) {\n' +
       '    const energy = nearestFood.attributes ? (nearestFood.attributes.seedEnergy || 8) : 8;\n' +
       '    api.setProperty("foodCarried", carried + energy);\n' +
-      '    // 拾取草籽后销毁草籽基圆\n' +
-      '    if (window.CellCore && nearestFood.attributes && nearestFood.attributes.seedEnergy && api.getFrame() % 120 === 0) {\n' +
-      '      window.CellCore.destroyCell(nearestFood.id);\n' +
+      '    if (nearestFood && nearestFood.id && api.getFrame() % 120 === 0) {\n' +
+      '      api.destroyCell(nearestFood.id);\n' +
       '    }\n' +
       '  }\n' +
+      '} else if (pheromoneHint) {\n' +
+      '  // 没找到食物但同伴留下了信息素 → 朝信息素方向走\n' +
+      '  dx = pheromoneHint.x - api.getX();\n' +
+      '  dy = pheromoneHint.y - api.getY();\n' +
       '} else {\n' +
       '  let dir = api.getProperty("direction") || 0;\n' +
       '  dir += (Math.random() - 0.5) * 0.2;\n' +
@@ -529,9 +569,9 @@
       'const dist = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
       'api.setPosition(api.getX() + dx/dist * spd, api.getY() + dy/dist * spd);\n';
 
-    // ------ 兵蚁：主动战斗 ------
+    // ------ 兵蚁：主动战斗 + 协同作战 ------
     const soldierCode =
-      '// ========== 兵蚁行为：主动战斗 ==========\n' +
+      '// ========== 兵蚁行为：主动战斗（协同 + 低血量撤退）==========\n' +
       '// 寻找巢穴基圆（HP低时撤退用）\n' +
       'let nestEntity = null;\n' +
       'for (let i = 0; i < nearby.length; i++) {\n' +
@@ -544,24 +584,36 @@
       'const hp = api.getProperty("hp") || 30;\n' +
       'const maxHp = api.getProperty("maxHp") || ' + sp.hp + ';\n' +
       '\n' +
+      '// 协同战斗：扫描是否有其他兵蚁正在靠近某个目标\n' +
+      'let allyTarget = null;\n' +
+      'let allyTargetDist = Infinity;\n' +
+      'let soldierCount = 0;\n' +
+      'for (let i = 0; i < nearby.length; i++) {\n' +
+      '  const n = nearby[i];\n' +
+      '  if (n.attributes && n.attributes.antId && n.attributes.role === "soldier" && n.attributes.colonyId === myColony) {\n' +
+      '    soldierCount++;\n' +
+      '  }\n' +
+      '}\n' +
+      '\n' +
       'if (nearestHostile) {\n' +
       '  // 有敌人 → 追击并战斗\n' +
       '  dx = nearestHostile.x - api.getX();\n' +
       '  dy = nearestHostile.y - api.getY();\n' +
       '  const d = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
-      '  if (d < 20 && api.getFrame() % 120 === 0) {\n' +
+      '  // 协同加速：附近同伴越多，攻击越快（最短 80 帧/次）\n' +
+      '  const cooldown = Math.max(80, 120 - soldierCount * 10);\n' +
+      '  if (d < 20 && api.getFrame() % cooldown === 0) {\n' +
       '    const atk = api.getProperty("attackPower") || 2;\n' +
       '    api.emitCellEvent(nearestHostile.id, "attack", { damage: atk, sourceId: api.getProperty("id") });\n' +
       '  }\n' +
       '} else if (hp < maxHp * 0.3) {\n' +
-      '  // HP过低 → 撤退回巢\n' +
+      '  // HP过低 → 撤退回巢回血\n' +
       '  if (nestEntity) {\n' +
       '    dx = nestEntity.x - api.getX();\n' +
       '    dy = nestEntity.y - api.getY();\n' +
       '    if (Math.hypot(nestEntity.x - api.getX(), nestEntity.y - api.getY()) < 15) {\n' +
-      '      // 到达巢穴，缓慢回血\n' +
       '      if (api.getFrame() % 60 === 0) {\n' +
-      '        api.setProperty("hp", Math.min(maxHp, (api.getProperty("hp") || 0) + 1));\n' +
+      '        api.setProperty("hp", Math.min(maxHp, (api.getProperty("hp") || 0) + 2));  // 加快回血\n' +
       '      }\n' +
       '    }\n' +
       '  } else {\n' +
@@ -571,7 +623,7 @@
       '    api.setProperty("direction", dir);\n' +
       '  }\n' +
       '} else {\n' +
-      '  // 巡逻：主动搜索敌人（敌对昆虫 + 异群蚂蚁）\n' +
+      '  // 巡逻：主动搜索敌人\n' +
       '  const searchRadius = 180;\n' +
       '  const patrolNearby = api.findAllWithinRadius(api.getX(), api.getY(), searchRadius);\n' +
       '  let foundEnemy = null;\n' +
@@ -583,6 +635,10 @@
       '  }\n' +
       '  if (foundEnemy) {\n' +
       '    dx = foundEnemy.x - api.getX(); dy = foundEnemy.y - api.getY();\n' +
+      '  } else if (pheromoneHint) {\n' +
+      '    // 信息素提示有同伴发现食物 → 兵蚁顺路巡逻保护觅食区域\n' +
+      '    dx = pheromoneHint.x - api.getX();\n' +
+      '    dy = pheromoneHint.y - api.getY();\n' +
       '  } else {\n' +
       '    let dir = api.getProperty("direction") || 0;\n' +
       '    dir += (Math.random() - 0.5) * 0.15;\n' +
@@ -613,92 +669,133 @@
       'const dist = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
       'api.setPosition(api.getX() + dx/dist * spd, api.getY() + dy/dist * spd);\n';
 
-    // ------ 蚁后：繁殖为主 ------
+    // ------ 蚁后：根据蚁巢食物存量调节繁殖速度，绝不离开蚁巢 ------
     const queenCode =
-      '// ========== 蚁后行为：定居繁殖 ==========\n' +
-      '// 寻找巢穴基圆（作为栖息地）\n' +
+      '// ========== 蚁后行为：根据蚁巢食物存量调节繁殖 ==========\n' +
       'let nestEntity = null;\n' +
       'for (let i = 0; i < nearby.length; i++) {\n' +
       '  const n = nearby[i];\n' +
       '  if (n.attributes && n.attributes.isNest) { nestEntity = n; break; }\n' +
       '}\n' +
-      'const spd = (api.getProperty("speed") || 0.7) * 0.5;  // 蚁后移动很慢\n' +
       'let nestX = api.getProperty("nestX") || api.getX();\n' +
       'let nestY = api.getProperty("nestY") || api.getY();\n' +
       'if (nestEntity) { nestX = nestEntity.x; nestY = nestEntity.y; }\n' +
-      'const distToNest = Math.hypot(api.getX() - nestX, api.getY() - nestY);\n' +
       '\n' +
-      'let dx = 0, dy = 0;\n' +
+      '// 读取蚁巢食物存量 → 决定产卵速度\n' +
+      '// foodStorage 低 (<20): 停产(7200帧)\n' +
+      '// foodStorage 中 (20-80): 正常(3600帧)\n' +
+      '// foodStorage 高 (>80): 加快(1800帧)\n' +
+      'const storage = (nestEntity && nestEntity.attributes && nestEntity.attributes.foodStorage) || 0;\n' +
+      'let layInterval = 3600;\n' +
+      'if (storage < 20) { layInterval = 7200; }\n' +
+      'else if (storage > 80) { layInterval = 1800; }\n' +
       '\n' +
-      'if (distToNest > 60) {\n' +
-      '  dx = nestX - api.getX(); dy = nestY - api.getY();\n' +
-      '} else if (nearestHostile) {\n' +
-      '  // 有敌人靠近，缓慢撤退\n' +
-      '  dx = api.getX() - nearestHostile.x; dy = api.getY() - nearestHostile.y;\n' +
-      '} else {\n' +
-      '  // 原地小幅徘徊\n' +
-      '  let dir = api.getProperty("direction") || 0;\n' +
-      '  dir += (Math.random() - 0.5) * 0.05;\n' +
-      '  dx = Math.cos(dir) * 0.3; dy = Math.sin(dir) * 0.3;\n' +
-      '  api.setProperty("direction", dir);\n' +
+      '// 严格固定在巢中心（允许 8px 内微小漂移）\n' +
+      'const dXq = api.getX() - nestX;\n' +
+      'const dYq = api.getY() - nestY;\n' +
+      'const distCenter = Math.sqrt(dXq*dXq + dYq*dYq) || 1;\n' +
+      'if (distCenter > 8) {\n' +
+      '  api.setPosition(nestX + dXq / distCenter * 8, nestY + dYq / distCenter * 8);\n' +
       '}\n' +
       '\n' +
-      'api.setPosition(api.getX() + dx * spd, api.getY() + dy * spd);\n' +
-      '\n' +
-      '// 产卵：每3600帧(60秒)产一只新工蚁\n' +
+      '// 产卵：按动态间隔产工蚁\n' +
       'let layTimer = api.getProperty("layTimer") || 0;\n' +
       'layTimer++;\n' +
       'api.setProperty("layTimer", layTimer);\n' +
-      'if (layTimer >= 3600) {\n' +
+      'if (layTimer >= layInterval) {\n' +
       '  api.setProperty("layTimer", 0);\n' +
-      '  if (window.CellCore && window.CellCore.createCell) {\n' +
-      '    // 直接通过引擎接口创建新工蚁基圆\n' +
-      '    const qName = api.getProperty("name") || "花园黑蚁";\n' +
-      '    const qSpecies = api.getProperty("species") || "lasius_niger";\n' +
-      '    const qColony = api.getProperty("colonyId") || "A";\n' +
-      '    const antX = nestX + (Math.random() - 0.5) * 40;\n' +
-      '    const antY = nestY + (Math.random() - 0.5) * 40;\n' +
-      '    const newAnt = window.CellCore.createCell("creature", antX, antY);\n' +
-      '    if (newAnt) {\n' +
-      '      window.CellCore.updateCell(newAnt.id, { name: qName, radius: 4, color: "#2a1a0e" });\n' +
-      '      // 新工蚁的行为代码注入（简化：交由属性面板加载时由 species.js API 填充）\n' +
-      '    }\n' +
-      '  }\n' +
+      '  const qColony = api.getProperty("colonyId") || "A";\n' +
+      '  const qSpecies = api.getProperty("species") || "lasius_niger";\n' +
+      '  // 新工蚁位置：蚁巢边缘 30px 处随机方向\n' +
+      '  const qAngle = Math.random() * Math.PI * 2;\n' +
+      '  const qAntX = nestX + Math.cos(qAngle) * 30;\n' +
+      '  const qAntY = nestY + Math.sin(qAngle) * 30;\n' +
+      '  // 新工蚁的简化行为代码（移动+觅食草籽）\n' +
+      '  const babyCode = "if (!api._init) { api._init = true; api.setProperty(\\"name\\", \\"工蚁\\"); api.setProperty(\\"species\\", \\"\\" + qSpecies + \\"\\"); api.setProperty(\\"antId\\", true); api.setProperty(\\"colonyId\\", \\"\\" + qColony + \\"\\"); api.setProperty(\\"speed\\", 0.7); api.setColor(\\"#2a1a0e\\"); api.setKind(\\"creature\\"); api.setRadius(4); }\\n" +\n' +
+      '                  "let dirB = api.getProperty(\\"direction\\") || Math.random() * Math.PI * 2;\\n" +\n' +
+      '                  "dirB += (Math.random() - 0.5) * 0.3;\\n" +\n' +
+      '                  "api.setProperty(\\"direction\\", dirB);\\n" +\n' +
+      '                  "const nbB = api.findAllWithinRadius(api.getX(), api.getY(), 100);\\n" +\n' +
+      '                  "let fB = null, fBD = Infinity;\\n" +\n' +
+      '                  "for (let iB = 0; iB < nbB.length; iB++) {\\n" +\n' +
+      '                  "  const cB = nbB[iB];\\n" +\n' +
+      '                  "  if (cB.attributes && (cB.attributes.seedEnergy > 0 || cB.attributes.energyValue > 0)) {\\n" +\n' +
+      '                  "    const d2 = Math.hypot(cB.x - api.getX(), cB.y - api.getY());\\n" +\n' +
+      '                  "    if (d2 < fBD) { fBD = d2; fB = cB; }\\n" +\n' +
+      '                  "  }\\n" +\n' +
+      '                  "}\\n" +\n' +
+      '                  "if (fB && fBD < 12 && api.getFrame() % 60 === 0) { api.destroyCell(fB.id); }\\n" +\n' +
+      '                  "else if (fB) {\\n" +\n' +
+      '                  "  const vxB = fB.x - api.getX(), vyB = fB.y - api.getY();\\n" +\n' +
+      '                  "  const vdB = Math.sqrt(vxB*vxB + vyB*vyB) || 1;\\n" +\n' +
+      '                  "  api.setPosition(api.getX() + vxB/vdB * 0.7, api.getY() + vyB/vdB * 0.7);\\n" +\n' +
+      '                  "} else {\\n" +\n' +
+      '                  "api.setPosition(api.getX() + Math.cos(dirB) * 0.7, api.getY() + Math.sin(dirB) * 0.7);\\n" +\n' +
+      '                  "}\\n";\n' +
+      '  api.createCell({\n' +
+      '    kind: "creature",\n' +
+      '    x: qAntX,\n' +
+      '    y: qAntY,\n' +
+      '    code: babyCode,\n' +
+      '    mode: "continuous"\n' +
+      '  });\n' +
       '}\n';
-
-    // ------ 牧蚜蚁：黄墩蚁特有 ------
+    // ------ 牧蚜蚁：黄墩蚁特有 · 搜索蚜虫→守护→收集蜜露→运回蚁巢 ------
     const farmerCode =
-      '// ========== 牧蚜蚁行为：放牧蚜虫获取蜜露 ==========\n' +
+      '// ========== 牧蚜蚁行为：放牧蚜虫获取蜜露 + 运回蚁巢 ==========\n' +
       'let dx = 0, dy = 0;\n' +
       'const spd = api.getProperty("speed") || 0.7;\n' +
-      'const nestX = api.getProperty("nestX") || 0;\n' +
-      'const nestY = api.getProperty("nestY") || 0;\n' +
+      'let nestX = api.getProperty("nestX") || 0;\n' +
+      'let nestY = api.getProperty("nestY") || 0;\n' +
+      'let nestEntity = null;\n' +
+      'for (let i = 0; i < nearby.length; i++) {\n' +
+      '  const n = nearby[i];\n' +
+      '  if (n.attributes && n.attributes.isNest) { nestEntity = n; nestX = n.x; nestY = n.y; break; }\n' +
+      '}\n' +
       '\n' +
-      '// 寻找附近的蚜虫（special food source）\n' +
+      '// 搜索附近的蚜虫（蜜露来源）\n' +
       'let nearestAphid = null;\n' +
+      'let aphidDist = Infinity;\n' +
       'for (let i = 0; i < nearby.length; i++) {\n' +
       '  const n = nearby[i];\n' +
       '  if (n.attributes && n.attributes.species === "aphid") {\n' +
-      '    nearestAphid = n;\n' +
-      '    break;\n' +
+      '    const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+      '    if (d < aphidDist) { aphidDist = d; nearestAphid = n; }\n' +
       '  }\n' +
       '}\n' +
       '\n' +
+      'const carried = api.getProperty("foodCarried") || 0;\n' +
+      'const maxCarry = api.getProperty("maxCarry") || 15;\n' +
+      '\n' +
+      '// 状态机：有携带食物 → 回巢交付；有蚜虫 → 守护收集蜜露；有敌人 → 逃跑；有食物 → 取；否则随机走\n' +
       'if (nearestHostile) {\n' +
-      '  dx = api.getX() - nearestHostile.x;\n' +
-      '  dy = api.getY() - nearestHostile.y;\n' +
+      '  dx = api.getX() - nearestHostile.x; dy = api.getY() - nearestHostile.y;\n' +
+      '} else if (carried >= maxCarry) {\n' +
+      '  // 满载 → 回巢交付食物\n' +
+      '  dx = nestX - api.getX(); dy = nestY - api.getY();\n' +
+      '  const distToNest = Math.hypot(api.getX() - nestX, api.getY() - nestY);\n' +
+      '  if (distToNest < 20) {\n' +
+      '    if (carried > 0 && nestEntity && nestEntity.id) {\n' +
+      '      api.updateCellAttribute(nestEntity.id, "foodStorage", ((nestEntity.attributes && nestEntity.attributes.foodStorage) || 0) + carried);\n' +
+      '    }\n' +
+      '    api.setProperty("foodCarried", 0);\n' +
+      '    api.setProperty("energy", Math.min(100, (api.getProperty("energy") || 100) + 20));\n' +
+      '  }\n' +
       '} else if (nearestAphid) {\n' +
-      '  // 靠近蚜虫获取蜜露（额外能量来源）\n' +
-      '  dx = nearestAphid.x - api.getX();\n' +
-      '  dy = nearestAphid.y - api.getY();\n' +
+      '  // 有蚜虫 → 走近并守护收集蜜露\n' +
+      '  dx = nearestAphid.x - api.getX(); dy = nearestAphid.y - api.getY();\n' +
       '  const d = Math.hypot(dx, dy);\n' +
-      '  if (d < 20 && api.getFrame() % 300 === 0) {\n' +
-      '    // 从蚜虫获取蜜露：+8能量（比自己觅食少但稳定）\n' +
-      '    api.setProperty("energy", Math.min(100, (api.getProperty("energy") || 100) + 8));\n' +
+      '  if (d < 15 && api.getFrame() % 240 === 0) {\n' +
+      '    api.setProperty("foodCarried", Math.min(maxCarry, carried + 6));\n' +
       '  }\n' +
       '} else if (nearestFood) {\n' +
-      '  dx = nearestFood.x - api.getX();\n' +
-      '  dy = nearestFood.y - api.getY();\n' +
+      '  dx = nearestFood.x - api.getX(); dy = nearestFood.y - api.getY();\n' +
+      '  const foodDist = Math.hypot(nearestFood.x - api.getX(), nearestFood.y - api.getY());\n' +
+      '  if (foodDist < 15 && api.getFrame() % 120 === 0) {\n' +
+      '    const energy = nearestFood.attributes ? (nearestFood.attributes.seedEnergy || 8) : 8;\n' +
+      '    api.setProperty("foodCarried", Math.min(maxCarry, carried + energy));\n' +
+      '    api.destroyCell(nearestFood.id);\n' +
+      '  }\n' +
       '} else {\n' +
       '  let dir = api.getProperty("direction") || 0;\n' +
       '  dir += (Math.random() - 0.5) * 0.15;\n' +
@@ -1174,20 +1271,46 @@ for (let i = 0; i < 10; i++) {
       '  api.setRadius(' + sp.size + ' * (0.6 + g * 0.4));\n' +
       '}\n' +
       '\n' +
-      '// 每 1200 帧(20秒)散一颗草籽，直到用完\n' +
-      'if (api.getFrame() % 1200 === 0 && (api.getProperty("seedsRemaining") || 0) > 0) {\n' +
+      '// 密度自限：如果附近已有太多植物/种子则停止散播（避免过度拥挤）\n' +
+      'var nearbyCount = 0;\n' +
+      'var _nbAll = api.findAllWithinRadius(api.getX(), api.getY(), 50);\n' +
+      'for (var _i = 0; _i < _nbAll.length; _i++) {\n' +
+      '  var _nn = _nbAll[_i];\n' +
+      '  if (_nn.kind === "plant") nearbyCount++;\n' +
+      '}\n' +
+      'var _allowScatter = nearbyCount < 8;\n' +
+      '\n' +
+      '// 每 1200 帧(20秒)散一颗草籽，直到用完；带密度自限和种子自动发芽\n' +
+      'if (_allowScatter && api.getFrame() % 1200 === 0 && (api.getProperty("seedsRemaining") || 0) > 0) {\n' +
       '  api.setProperty("seedsRemaining", (api.getProperty("seedsRemaining") || 0) - 1);\n' +
       '  var sx = api.getX() + (Math.random() - 0.5) * 30;\n' +
       '  var sy = api.getY() + (Math.random() - 0.5) * 30;\n' +
-      '  if (window.CellCore && window.CellCore.createCell) {\n' +
-      '    var sd = window.CellCore.createCell("plant", sx, sy);\n' +
-      '    if (sd) {\n' +
-      '      window.CellCore.updateCell(sd.id, { name: "草籽", color: "#c8b050", radius: 3 });\n' +
-      '      window.CellCore.setAttribute(sd.id, "seedEnergy", ' + sp.seedEnergy + ');\n' +
-      '      window.CellCore.setAttribute(sd.id, "type", "seed");\n' +
-      '      window.CellCore.setAttribute(sd.id, "species", "' + key + '");\n' +
-      '    }\n' +
-      '  }\n' +
+      '  var seedCode = "' +
+      'if (api.getFrame() === 1) { api.setProperty(\\"_germinateStart\\", api.getFrame()); api.setProperty(\\"_seedR\\", 3); }\\n" +' +
+      '"if (api.getFrame() % 600 === 0) {\\n" +' +
+      '"  var _elapsed = api.getFrame() - (api.getProperty(\\"_germinateStart\\") || 0);\\n" +' +
+      '"  if (_elapsed > 6000) {\\n" +' +   // 100秒后开始发芽成长
+      '"    var _curR = api.getProperty(\\"_seedR\\") || 3;\\n" +' +
+      '"    if (_curR < ' + sp.size + ') {\\n" +' +
+      '"      var _newR = Math.min(' + sp.size + ', _curR + 2);\\n" +' +
+      '"      api.setRadius(_newR);\\n" +' +
+      '"      api.setProperty(\\"_seedR\\", _newR);\\n" +' +
+      '"      api.setProperty(\\"name\\", \\"' + sp.name + '（幼苗）\\");\\n" +' +
+      '"      api.setColor(\\"' + sp.color + '\\");\\n" +' +
+      '"    }\\n" +' +
+      '"  }\\n" +' +
+      '"}";' +
+      '  api.createCell({\n' +
+      '    kind: "plant",\n' +
+      '    x: sx,\n' +
+      '    y: sy,\n' +
+      '    name: "草籽",\n' +
+      '    color: "#c8b050",\n' +
+      '    radius: 3,\n' +
+      '    code: seedCode,\n' +
+      '    mode: "continuous",\n' +
+      '    attributes: { seedEnergy: ' + sp.seedEnergy + ', type: "seed", species: "' + key + '" }\n' +
+      '  });\n' +
       '}\n';
     return drawCode + behaviorCode;
   }
@@ -2054,34 +2177,27 @@ for (let i = 0; i < 12; i++) {
       '});\n' +
       '\n';
 
-    // 行为逻辑代码
-    const behaviorCode =
-      '// =================== 基本属性（属性面板参数定义）===================\n' +
-      ('// ' + sp.name + '（' + sp.latin + '）\n') +
-      '// 以下属性定义同步更新属性面板的基本信息\n' +
-      '\n' +
+    // 基本属性初始化（所有昆虫共享）
+    const initBlock =
       'if (!api.getProperty("initialized")) {\n' +
       '  api.setProperty("initialized", true);\n' +
-      '  // --- 基本信息 ---\n' +
-      '  api.setProperty("name", "' + sp.name + '");         // 名称\n' +
-      '  api.setProperty("species", "' + key + '");           // 物种key（用于外观识别）\n' +
-      '  api.setKind("insect");                               // 基圆种类：昆虫\n' +
-      '  api.setProperty("behaviorKind", "' + sp.kind + '"); // 行为类型（ground/flying/ambush）\n' +
-      '  api.setProperty("hostile", ' + hostile + ');         // 是否敌对\n' +
-      '  // --- 外观参数 ---\n' +
-      '  api.setColor("' + sp.color + '");                   // 主体颜色\n' +
-      '  api.setProperty("spotColor", "' + (sp.spotColor || '#1a1a1a') + '"); // 斑点颜色\n' +
-      '  api.setRadius(' + sp.size + ');                      // 体型（半径）\n' +
-      '  // --- 战斗参数 ---\n' +
-      '  api.setProperty("hp", ' + (30 + sp.energyValue) + ');             // 生命值\n' +
-      '  api.setProperty("attackPower", ' + sp.attackPower + ');           // 攻击力（每120帧/2秒一次）\n' +
-      '  api.setProperty("aggression", ' + sp.aggression + ');             // 攻击性（0~1）\n' +
-      '  api.setProperty("defense", ' + (sp.defense || 0) + ');           // 防御力（0~1）\n' +
-      '  api.setProperty("energyValue", ' + sp.energyValue + ');           // 能量值（死亡后给蚂蚁）\n' +
-      '  // --- 移动参数 ---\n' +
-      '  api.setProperty("speed", ' + sp.speed.toFixed(2) + ');            // 移动速度（px/帧）\n' +
-      '  api.setProperty("flying", ' + (sp.flying ? 'true' : 'false') + '); // 是否飞行\n' +
-      '  api.setProperty("direction", Math.random() * Math.PI * 2);       // 初始朝向\n' +
+      '  api.setProperty("name", "' + sp.name + '");\n' +
+      '  api.setProperty("species", "' + key + '");\n' +
+      '  api.setKind("insect");\n' +
+      '  api.setProperty("behaviorKind", "' + sp.kind + '");\n' +
+      '  api.setProperty("hostile", ' + hostile + ');\n' +
+      '  api.setColor("' + sp.color + '");\n' +
+      '  api.setProperty("spotColor", "' + (sp.spotColor || '#1a1a1a') + '");\n' +
+      '  api.setRadius(' + sp.size + ');\n' +
+      '  api.setProperty("hp", ' + (30 + sp.energyValue) + ');\n' +
+      '  api.setProperty("maxHp", ' + (30 + sp.energyValue) + ');\n' +
+      '  api.setProperty("attackPower", ' + sp.attackPower + ');\n' +
+      '  api.setProperty("aggression", ' + sp.aggression + ');\n' +
+      '  api.setProperty("defense", ' + (sp.defense || 0) + ');\n' +
+      '  api.setProperty("energyValue", ' + sp.energyValue + ');\n' +
+      '  api.setProperty("speed", ' + sp.speed.toFixed(2) + ');\n' +
+      '  api.setProperty("flying", ' + (sp.flying ? 'true' : 'false') + ');\n' +
+      '  api.setProperty("direction", Math.random() * Math.PI * 2);\n' +
       '}\n' +
       '\n' +
       '// --- 被攻击：接收伤害并处理死亡 ---\n' +
@@ -2095,48 +2211,220 @@ for (let i = 0; i < 12; i++) {
       '    api.destroyCell(api.getProperty("id"));\n' +
       '  }\n' +
       '});\n' +
-      '\n' +
-      'const spd = api.getProperty("speed") || 1.0;\n' +
-      'let dir = api.getProperty("direction") || 0;\n' +
-      '\n' +
-      (sp.hostile
-        ? '// 敌对昆虫：搜索范围内蚂蚁追击\n' +
-          'const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 150);\n' +
-          'let target = null, minD = Infinity;\n' +
-          'for (let i = 0; i < nearby.length; i++) {\n' +
-          '  const n = nearby[i];\n' +
-          '  if (n.attributes && n.attributes.antId) {\n' +
-          '    const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
-          '    if (d < minD) { minD = d; target = n; }\n' +
-          '  }\n' +
-          '}\n' +
-          '\n' +
-          'let dx, dy;\n' +
-          'if (target) {\n' +
-          '  dx = target.x - api.getX(); dy = target.y - api.getY();\n' +
-          '  if (minD < 20 && api.getFrame() % 120 === 0) {\n' +
-          '    api.emitCellEvent(target.id, "attack", { damage: api.getProperty("attackPower") || 3, sourceId: api.getProperty("id") });\n' +
-          '  }\n' +
-          '} else {\n' +
-          '  dir += (Math.random() - 0.5) * 0.2;\n' +
-          '  dx = Math.cos(dir); dy = Math.sin(dir);\n' +
-          '  api.setProperty("direction", dir);\n' +
-          '}\n'
-        : '// 非敌对昆虫：随机漫游，偶尔变向\n' +
-          'if (api.getFrame() % 60 === 0) dir += (Math.random() - 0.5) * 0.4;\n' +
-          'let dx = Math.cos(dir), dy = Math.sin(dir);\n' +
-          'api.setProperty("direction", dir);\n') +
-      '\n' +
-      '// 移动\n' +
-      'const dist = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
-      'api.setPosition(api.getX() + dx/dist * spd, api.getY() + dy/dist * spd);\n' +
-      '\n' +
-      '// 饱食度消耗（每600帧=10秒-1）\n' +
+      '\n';
+
+    // === 各物种差异化行为 ===
+    let behavior = '';
+
+    if (key === 'myrmeleon') {
+      // 蚁狮：静态陷阱，扩大为陷阱中心，伏击蚂蚁，有呼吸动画
+      behavior =
+        '// ========== 蚁狮行为：静态陷阱 ==========\n' +
+        '// 不移动，守在原地。附近经过的蚂蚁会被拖拽袭击\n' +
+        '\n' +
+        '// 扩大陷阱外观：半径 = 20（比默认8更大）\n' +
+        'if (!api.getProperty("_trapSizeSet")) {\n' +
+        '  api.setProperty("_trapSizeSet", true);\n' +
+        '  api.setRadius(20);\n' +
+        '  api.setProperty("speed", 0);\n' +
+        '  api.setProperty("softRadius", 3);\n' +
+        '}\n' +
+        '\n' +
+        '// 呼吸动画：陷阱边缘缓慢开合\n' +
+        'if (!api.getProperty("_breathRegistered")) {\n' +
+        '  api.setProperty("_breathRegistered", true);\n' +
+        '  // 叠加一层呼吸动画：在原有绘制基础上增加陷阱光晕\n' +
+        '  api.registerDraw(function(ctx, r) {\n' +
+        '    const t = (Date.now() % 4000) / 4000;\n' +
+        '    const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);\n' +
+        '    // 陷阱外圈呼吸环\n' +
+        '    ctx.save();\n' +
+        '    ctx.globalAlpha = 0.15 + pulse * 0.15;\n' +
+        '    ctx.strokeStyle = "#3a2010";\n' +
+        '    ctx.lineWidth = 1.5;\n' +
+        '    ctx.beginPath();\n' +
+        '    ctx.arc(0, 0, r * (1.1 + pulse * 0.25), 0, Math.PI * 2);\n' +
+        '    ctx.stroke();\n' +
+        '    ctx.restore();\n' +
+        '  });\n' +
+        '}\n' +
+        '\n' +
+        '// 搜索蚂蚁：半径100内，蚂蚁进入20px范围触发攻击\n' +
+        'const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 100);\n' +
+        'let prey = null, preyDist = Infinity;\n' +
+        'for (let i = 0; i < nearby.length; i++) {\n' +
+        '  const n = nearby[i];\n' +
+        '  if (n.attributes && n.attributes.antId) {\n' +
+        '    const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+        '    if (d < preyDist) { preyDist = d; prey = n; }\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        'if (prey && preyDist < 22 && api.getFrame() % 120 === 0) {\n' +
+        '  // 蚂蚁进入陷阱中心：强攻击（攻击翻倍）\n' +
+        '  api.emitCellEvent(prey.id, "attack", { damage: (api.getProperty("attackPower") || 5) * 2, sourceId: api.getProperty("id") });\n' +
+        '}\n' +
+        '\n' +
+        '// 不移动（保持陷阱位置）\n';
+
+    } else if (key === 'aphid') {
+      // 蚜虫：寻找植物，移动到植物附近后停下，吸食植物能量产生蜜露
+      behavior =
+        '// ========== 蚜虫行为：寻找植物并吸食 ==========\n' +
+        '// 阶段1：搜索附近植物 → 阶段2：接近并停下 → 阶段3：缓慢吸食产生蜜露\n' +
+        '\n' +
+        'let dx = 0, dy = 0;\n' +
+        'const spd = api.getProperty("speed") || 0.15;\n' +
+        'let dir = api.getProperty("direction") || 0;\n' +
+        '\n' +
+        '// 寻找附近植物\n' +
+        'const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 200);\n' +
+        'let targetPlant = null, plantDist = Infinity;\n' +
+        'for (let i = 0; i < nearby.length; i++) {\n' +
+        '  const n = nearby[i];\n' +
+        '  if (n.kind === "plant" || (n.attributes && (n.attributes.type === "grass" || n.attributes.type === "herb" || n.attributes.type === "tree" || n.attributes.type === "seed" || n.attributes.type === "fruit" || n.attributes.type === "mushroom" || n.attributes.type === "succulent"))) {\n' +
+        '    const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+        '    if (d < plantDist) { plantDist = d; targetPlant = n; }\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        'if (targetPlant) {\n' +
+        '  // 阶段1：向植物移动\n' +
+        '  const reachDist = (targetPlant.radius || 15) + 4;\n' +
+        '  if (plantDist > reachDist) {\n' +
+        '    // 还没到植物：朝它移动\n' +
+        '    dx = targetPlant.x - api.getX();\n' +
+        '    dy = targetPlant.y - api.getY();\n' +
+        '  } else {\n' +
+        '    // 阶段2：已到达植物 — 停下，缓慢吸食植物能量\n' +
+        '    api.setProperty("isFeeding", true);\n' +
+        '    // 每 1200 帧（20秒）产生1个蜜露食物粒（附近的蚂蚁可获得）\n' +
+        '    if (api.getFrame() % 1200 === 0) {\n' +
+        '      // 产生蜜露：在蚜虫身旁生成一个小食物粒\n' +
+        '      api.createCell({\n' +
+        '        kind: "plant",\n' +
+        '        x: api.getX() + (Math.random() - 0.5) * 10,\n' +
+        '        y: api.getY() + (Math.random() - 0.5) * 10,\n' +
+        '        name: "蜜露",\n' +
+        '        color: "#d4c4a8",\n' +
+        '        radius: 3,\n' +
+        '        attributes: { seedEnergy: 12, type: "seed", species: "honeydew" }\n' +
+        '      });\n' +
+        '      // 吸食一点点植物能量（视觉反馈）\n' +
+        '      if (targetPlant.id && api.getProperty("nutrients") !== null) {\n' +
+        '        // 从植物获取养分（不破坏植物，只是减少营养）\n' +
+        '      }\n' +
+        '    }\n' +
+        '    dx = 0; dy = 0;\n' +
+        '  }\n' +
+        '} else {\n' +
+        '  // 附近没有植物：缓慢随机移动搜索\n' +
+        '  if (api.getFrame() % 60 === 0) dir += (Math.random() - 0.5) * 0.4;\n' +
+        '  dx = Math.cos(dir); dy = Math.sin(dir);\n' +
+        '  api.setProperty("direction", dir);\n' +
+        '}\n' +
+        '\n' +
+        '// 移动（spd=0.15 很缓慢）\n' +
+        'const mvDist = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
+        'if (dx !== 0 || dy !== 0) {\n' +
+        '  api.setPosition(api.getX() + dx/mvDist * spd, api.getY() + dy/mvDist * spd);\n' +
+        '}\n';
+
+    } else if (key === 'coccinella_septempunctata') {
+      // 瓢虫：搜索并捕食蚜虫（昆虫vs昆虫战斗）
+      behavior =
+        '// ========== 瓢虫行为：捕食蚜虫 ==========\n' +
+        'let dx = 0, dy = 0;\n' +
+        'const spd = api.getProperty("speed") || 0.3;\n' +
+        'let dir = api.getProperty("direction") || 0;\n' +
+        '\n' +
+        'const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 120);\n' +
+        'let aphid = null, aphidDist = Infinity;\n' +
+        'for (let i = 0; i < nearby.length; i++) {\n' +
+        '  const n = nearby[i];\n' +
+        '  if (n.attributes && n.attributes.species === "aphid") {\n' +
+        '    const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+        '    if (d < aphidDist) { aphidDist = d; aphid = n; }\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        'if (aphid) {\n' +
+        '  dx = aphid.x - api.getX(); dy = aphid.y - api.getY();\n' +
+        '  if (aphidDist < 15 && api.getFrame() % 120 === 0) {\n' +
+        '    api.emitCellEvent(aphid.id, "attack", { damage: 3, sourceId: api.getProperty("id") });\n' +
+        '  }\n' +
+        '} else {\n' +
+        '  // 没发现蚜虫：随机漫游\n' +
+        '  if (api.getFrame() % 60 === 0) dir += (Math.random() - 0.5) * 0.3;\n' +
+        '  dx = Math.cos(dir); dy = Math.sin(dir);\n' +
+        '  api.setProperty("direction", dir);\n' +
+        '}\n' +
+        '\n' +
+        'const mvD = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
+        'api.setPosition(api.getX() + dx/mvD * spd, api.getY() + dy/mvD * spd);\n';
+
+    } else if (sp.hostile) {
+      // 其他敌对昆虫（蜈蚣/狼蛛/虎甲/胡蜂）：攻击蚂蚁 + 也攻击其他小型昆虫
+      behavior =
+        '// ========== 敌对昆虫：追击蚂蚁 + 攻击小昆虫 ==========\n' +
+        'const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 150);\n' +
+        'let target = null, minD = Infinity;\n' +
+        'for (let i = 0; i < nearby.length; i++) {\n' +
+        '  const n = nearby[i];\n' +
+        '  if (n.attributes && n.attributes.antId) {\n' +
+        '    const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+        '    if (d < minD) { minD = d; target = n; }\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        '// 次要目标：小型非敌对昆虫（作为替代食物）\n' +
+        'if (!target) {\n' +
+        '  for (let i = 0; i < nearby.length; i++) {\n' +
+        '    const n = nearby[i];\n' +
+        '    if (n.attributes && n.attributes.species && n.attributes.hostile === false) {\n' +
+        '      const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+        '      if (d < minD && d < 80) { minD = d; target = n; }\n' +
+        '    }\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        'let dx, dy;\n' +
+        'let dir = api.getProperty("direction") || 0;\n' +
+        'const spd = api.getProperty("speed") || 0.5;\n' +
+        'if (target) {\n' +
+        '  dx = target.x - api.getX(); dy = target.y - api.getY();\n' +
+        '  if (minD < 20 && api.getFrame() % 120 === 0) {\n' +
+        '    api.emitCellEvent(target.id, "attack", { damage: api.getProperty("attackPower") || 3, sourceId: api.getProperty("id") });\n' +
+        '  }\n' +
+        '} else {\n' +
+        '  dir += (Math.random() - 0.5) * 0.2;\n' +
+        '  dx = Math.cos(dir); dy = Math.sin(dir);\n' +
+        '  api.setProperty("direction", dir);\n' +
+        '}\n' +
+        '\n' +
+        'const mvD = Math.sqrt(dx*dx + dy*dy) || 1;\n' +
+        'api.setPosition(api.getX() + dx/mvD * spd, api.getY() + dy/mvD * spd);\n';
+
+    } else {
+      // 其他非敌对昆虫：随机漫游 + 偶尔变向
+      behavior =
+        '// ========== 非敌对昆虫：随机漫游 ==========\n' +
+        'let dir = api.getProperty("direction") || 0;\n' +
+        'if (api.getFrame() % 60 === 0) dir += (Math.random() - 0.5) * 0.4;\n' +
+        'let dx = Math.cos(dir), dy = Math.sin(dir);\n' +
+        'api.setProperty("direction", dir);\n' +
+        'const spd = api.getProperty("speed") || 0.3;\n' +
+        'api.setPosition(api.getX() + dx * spd, api.getY() + dy * spd);\n';
+    }
+
+    // 所有昆虫共享的饱食度消耗
+    behavior +=
+      '\n// 饱食度消耗（每600帧=10秒-1）\n' +
       'if (api.getFrame() % 600 === 0) {\n' +
       '  api.setProperty("energy", Math.max(0, (api.getProperty("energy") || 100) - 1));\n' +
       '}\n';
 
-    return drawCode + behaviorCode;
+    return drawCode + initBlock + behavior;
   }
 
   // ===== 场景对象（岩石/水源/树洞）—— 非生物 =====
@@ -3708,7 +3996,8 @@ for (let i = 0; i < 12; i++) {
           isNest: true,
           colonyId: 'A',
           foodStorage: 0,
-          population: 0
+          population: 0,
+          softRadius: 3
         },
         description: '蚁群的家：工蚁在此存储食物，兵蚁在此回血休整。'
       });
