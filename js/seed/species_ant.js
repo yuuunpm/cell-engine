@@ -341,6 +341,17 @@
       '  if (qBT > 600) {\n' +
       '    // 在当前位置创建蚁巢基圆\n' +
       '    const qColony = api.getProperty("colonyId") || "A";\n' +
+      '    const nestDrawCode = \'api.registerDraw(function(ctx, r) { \' +\n' +
+      '      \'const cx = 0, cy = 0; \' +\n' +
+      '      \'ctx.fillStyle = "#5a3a1a"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.fillStyle = "#8b5a2b"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r * 0.85, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.fillStyle = "#3a2a1a"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r * 0.3, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.fillStyle = "#2a1a0a"; \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(cx, cy, r * 0.15, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '    });\';\n' +
       '    api.createCell({\n' +
       '      kind: "static",\n' +
       '      x: api.getX(),\n' +
@@ -349,6 +360,7 @@
       '      color: "#8b5a2b",\n' +
       '      radius: 40,\n' +
       '      shape: "circle",\n' +
+      '      code: nestDrawCode,\n' +
       '      attributes: {\n' +
       '        type: "nest",\n' +
       '        sceneType: "nest",\n' +
@@ -438,6 +450,36 @@
       '      \'api.setProperty("maxHp", \' + (qRole === "soldier" ? \'40\' : \'30\') + \'); \' +\n' +
       '      \'api.setProperty("nestX", \' + qNestX.toFixed(1) + \'); \' +\n' +
       '      \'api.setProperty("nestY", \' + qNestY.toFixed(1) + \'); \' +\n' +
+      '      \'api.registerDraw(function(ctx, r) { \' +\n' +
+      '      \'const dir = api.getProperty("direction") || 0; \' +\n' +
+      '      \'const headR = r * 0.35, bodyR = r * 0.25, thoraxR = r * 0.2, abdomenR = r * 0.4; \' +\n' +
+      '      \'const legLen = r * 0.6; \' +\n' +
+      '      \'const antColor = "#2a1a0e", legColor = "#3a2a1a"; \' +\n' +
+      '      \'ctx.save(); ctx.rotate(dir); \' +\n' +
+      '      \'ctx.fillStyle = antColor; \' +\n' +
+      '      \'ctx.beginPath(); ctx.ellipse(r * 0.45, 0, abdomenR, abdomenR * 0.7, 0, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(r * 0.1, 0, thoraxR, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.beginPath(); ctx.arc(-r * 0.25, 0, headR, 0, Math.PI * 2); ctx.fill(); \' +\n' +
+      '      \'ctx.strokeStyle = antColor; ctx.lineWidth = Math.max(0.8, r * 0.06); \' +\n' +
+      '      \'ctx.beginPath(); ctx.moveTo(-r * 0.35, -headR * 0.3); ctx.quadraticCurveTo(-r * 0.55, -headR * 0.8, -r * 0.5, -headR * 1.2); ctx.stroke(); \' +\n' +
+      '      \'ctx.beginPath(); ctx.moveTo(-r * 0.35, headR * 0.3); ctx.quadraticCurveTo(-r * 0.55, headR * 0.8, -r * 0.5, headR * 1.2); ctx.stroke(); \' +\n' +
+      '      \'for (let i = 0; i < 3; i++) { \' +\n' +
+      '      \'const t = (i - 1) * 0.25; \' +\n' +
+      '      \'const side = i === 0 ? -1 : (i === 2 ? 1 : 0); \' +\n' +
+      '      \'if (side === 0) continue; \' +\n' +
+      '      \'const startX = r * t, startY = bodyR * 0.5; \' +\n' +
+      '      \'const femurAngle = side * 0.5; \' +\n' +
+      '      \'const femurEndX = startX + Math.cos(femurAngle) * legLen * 0.4; \' +\n' +
+      '      \'const femurEndY = startY + side * legLen * 0.3; \' +\n' +
+      '      \'ctx.strokeStyle = legColor; ctx.lineWidth = Math.max(0.8, r * 0.04); \' +\n' +
+      '      \'ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(femurEndX, femurEndY); ctx.stroke(); \' +\n' +
+      '      \'const tibiaAngle = femurAngle + side * 0.7; \' +\n' +
+      '      \'const tibiaEndX = femurEndX + Math.cos(tibiaAngle) * legLen * 0.35; \' +\n' +
+      '      \'const tibiaEndY = femurEndY + side * legLen * 0.25; \' +\n' +
+      '      \'ctx.beginPath(); ctx.moveTo(femurEndX, femurEndY); ctx.lineTo(tibiaEndX, tibiaEndY); ctx.stroke(); \' +\n' +
+      '      \'} \' +\n' +
+      '      \'ctx.restore(); \' +\n' +
+      '      \'}); \' +\n' +
       '      \'}\';\n' +
       '\n' +
       '    const babyBehavior = qRole === "soldier"\n' +
