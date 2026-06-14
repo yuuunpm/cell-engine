@@ -1457,7 +1457,17 @@ const DevConsole = (() => {
 
   // ========== 创建蚁后（玩家命令：create_queen / 创建一只蚁后） ==========
   function _createQueen(rawText) {
-    if (!_cellCore) return { type: 'error', text: 'CellCore 未初始化' };
+    console.log('[DevConsole] _createQueen 被调用，输入:', rawText);
+    if (!_cellCore) {
+      console.error('[DevConsole] _cellCore 未初始化');
+      return { type: 'error', text: 'CellCore 未初始化' };
+    }
+
+    const sr = window.SpeciesRegistry;
+    console.log('[DevConsole] SpeciesRegistry:', sr ? '已加载' : '未加载');
+    if (sr && typeof sr.getAntBehaviorCode === 'function') {
+      console.log('[DevConsole] getAntBehaviorCode 可用');
+    }
     const center = _getCenterPosition();
     // 在相机中心附近创建蚁后（略微偏移）
     const qx = center.x + (Math.random() - 0.5) * 40;
