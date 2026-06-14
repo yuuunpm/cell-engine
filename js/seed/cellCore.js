@@ -208,6 +208,12 @@ const CellCore = (() => {
     const id = _generateId();
 
     const now = Date.now();
+    // 根据 kind 设置默认 zIndex：静态物体/蚁巢在最底层，植物在中层，生物在上层，特效/信息素在最上层
+    let defaultZ = 0;
+    if (kind === 'static' || kind === 'empty') defaultZ = 0;
+    else if (kind === 'plant') defaultZ = 5;
+    else if (kind === 'creature' || kind === 'effect') defaultZ = 10;
+    else defaultZ = 5;
     const cell = {
       id,
       name: kindDef.name || kind,
@@ -218,7 +224,7 @@ const CellCore = (() => {
       radius: kindDef.defaultRadius || 25,
       rotation: 0,
       opacity: kindDef.defaultOpacity || 1,
-      zIndex: 0,
+      zIndex: defaultZ,
       color: kindDef.defaultColor || '#ffffff',
       shape: kindDef.defaultShape || 'circle',
       selectable: true,
