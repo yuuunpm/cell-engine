@@ -878,9 +878,17 @@ const CellCore = (() => {
                 const bothFlying = flyingA && flyingB;
                 const oneFlying = flyingA || flyingB;
 
-                // 碰撞检测半径缩小一圈（0.85）→ 可以接触但不会完全重叠
-                const collRadiusA = cellA.radius * 0.85;
-                const collRadiusB = cellB.radius * 0.85;
+                // softRadius 属性：自定义碰撞半径（视觉半径不改变）
+                // 若 softRadius 存在 → 直接使用该值作为碰撞半径
+                // 否则 → 使用 radius * 0.85（可以接触但不会完全重叠）
+                const getSoftRadius = (cell) => {
+                  if (cell && cell.attributes && typeof cell.attributes.softRadius === 'number') {
+                    return cell.attributes.softRadius;
+                  }
+                  return cell.radius * 0.85;
+                };
+                const collRadiusA = getSoftRadius(cellA);
+                const collRadiusB = getSoftRadius(cellB);
                 const minOverlapDist = collRadiusA + collRadiusB;
 
                 if (!bothFlying && !isEngineA && !isEngineB) {
