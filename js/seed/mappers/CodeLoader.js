@@ -35,7 +35,7 @@
 
     /**
      * 获取基圆的代码映射模式
-     * 自动检测
+     * 自动检测：优先显式标记，其次智能推断（基于代码大小和复杂度）
      */
     getMode(cellId) {
       // 缓存优先
@@ -47,7 +47,7 @@
       const cell = this._cellCore.getCell(cellId);
       if (!cell) return Types.CodeMappingMode.SEGMENT;
 
-      // 按优先级检测
+      // 1. 优先检测显式标记（文件夹/文件路径）
       if (FolderMapper.detect(cell)) {
         this._cellModeCache.set(cellId, Types.CodeMappingMode.FOLDER);
         return Types.CodeMappingMode.FOLDER;
@@ -58,9 +58,82 @@
         return Types.CodeMappingMode.FILE;
       }
 
-      // 默认segment模式
-      this._cellModeCache.set(cellId, Types.CodeMappingMode.SEGMENT);
-      return Types.CodeMappingMode.SEGMENT;
+      // 2. 智能推断：根据代码大小和复杂度自动选择
+      const codeStr = typeof cell.code === 'string' ? cell.code : '';
+      const { lineCount, complexityScore } = this._analyzeCodeComplexity(codeStr);
+
+      let autoMode;
+      // 复杂度极高（>300行 或 复杂嵌套）→ 文件夹模式
+      if (lineCount > 300 || complexityScore > 8) {
+        autoMode = Types.CodeMappingMode.FOLDER;
+      }
+      // 中等复杂度（50-300行 或 中等嵌套）→ 文件模式
+      else if (lineCount > 50 || complexityScore > 4) {
+        autoMode = Types.CodeMappingMode.FILE;
+      }
+      // 简单代码（<50行）→ 片段模式
+      else {
+        autoMode = Types.CodeMappingMode.SEGMENT;
+      }
+
+      this._cellModeCache.set(cellId, autoMode);
+      return autoMode;
+    }
+
+    /**
+     * 分析代码复杂度
+     * @param {string} code - 代码字符串
+     * @returns {{ lineCount: number, complexityScore: number }}
+     */
+    _analyzeCodeComplexity(code) {
+      if (!code || typeof code !== 'string') {
+        return { lineCount: 0, complexityScore: 0 };
+      }
+
+      // 行数统计
+      const lines = code.split('\n');
+      const nonEmptyLines = lines.filter(l => l.trim().length > 0);
+      const lineCount = nonEmptyLines.length;
+
+      // 复杂度评分（0-10）
+      let score = 0;
+
+      // 评分维度：
+      // 1. 嵌套深度（函数/if/for 嵌套层数）
+      const maxIndent = Math.max(...nonEmptyLines.map(l => {
+        const trimmed = l.replace(/\t/g, '  ');
+        return trimmed.search(/\S/);
+      }).filter(v => v >= 0));
+      if (maxIndent > 30) score += 2;  // 深缩进 → 高嵌套
+      else if (maxIndent > 15) score += 1;
+
+      // 2. 函数数量
+      const funcCount = (code.match(/\bfunction\s+\w+|\b\w+\s*=\s*(?:function|\(|=>)/g) || []).length;
+      if (funcCount > 5) score += 2;
+      else if (funcCount > 2) score += 1;
+
+      // 3. 循环和条件数量
+      const loopCount = (code.match(/\b(for|while|do)\b/g) || []).length;
+      const condCount = (code.match(/\b(if|else|switch|case)\b/g) || []).length;
+      score += Math.min(2, Math.floor((loopCount + condCount) / 5));
+
+      // 4. 字符串模板/拼接复杂度
+      const templateCount = (code.match(/`[^`]*\$\{[^}]+\}[^`]*`/g) || []).length;
+      const concatCount = (code.match(/\+\s*['"`]/g) || []).length;
+      if (templateCount > 3 || concatCount > 10) score += 1;
+
+      // 5. 动态代码执行（eval/new Function/Function 构造）
+      if (/\b(eval|new\s+Function|Function)\s*\(/g.test(code)) score += 1;
+
+      // 6. API 调用数量
+      const apiCalls = (code.match(/\bapi\.\w+\(/g) || []).length;
+      if (apiCalls > 20) score += 1;
+      else if (apiCalls > 10) score += 0.5;
+
+      return {
+        lineCount,
+        complexityScore: Math.min(10, score)  // 最高10分
+      };
     }
 
     /**
