@@ -355,8 +355,8 @@ const RenderBridge = (() => {
       ctx.setLineDash([]);
     }
 
-    // 绘制名称
-    if (cell.name && _camera.zoom > 0.5) {
+    // 绘制名称（特效基圆不显示名称，避免视觉杂乱）
+    if (cell.name && _camera.zoom > 0.5 && cell.kind !== 'effect') {
       ctx.globalAlpha = (isGhostCell ? 0.6 : cell.opacity * 0.8);
       ctx.fillStyle = '#ffffff';
       ctx.font = `${Math.max(10, 12 / _camera.zoom)}px sans-serif`;
