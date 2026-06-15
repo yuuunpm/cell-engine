@@ -263,15 +263,19 @@
     // - building: 创建蚁巢，完成后进入 nesting
     // - nesting: 固定在蚁巢内，根据 foodStorage 产不同角色的蚂蚁
     const queenCode =
-      '// ========== 蚁后行为：探索→建巢→产蚁（状态机 v4.1）==========\n' +
-      '// 初始状态：还没有蚁巢 → 探索寻找安全地点\n' +
-      'if (!api.getProperty("queenState")) {\n' +
-      '  api.setProperty("queenState", "explore");\n' +
-      '  api.setProperty("exploreTimer", 0);\n' +
-      '  api.setProperty("energy", 150);  // 蚁后初始能量更高\n' +
-      '}\n' +
+      '// ========== 蚁后行为：探索→建巢→产蚁（状态机 v4.2）==========\n' +
+      '// 初始化：确保 queenState 始终有有效值\n' +
+      '(function() {\n' +
+      '  const _qs = api.getProperty("queenState");\n' +
+      '  const _valid = ["explore", "digesting", "building", "nesting"];\n' +
+      '  if (_valid.indexOf(_qs) < 0) {\n' +
+      '    api.setProperty("queenState", "explore");\n' +
+      '    api.setProperty("exploreTimer", 0);\n' +
+      '    if ((api.getProperty("energy") || 0) < 100) api.setProperty("energy", 150);\n' +
+      '  }\n' +
+      '})();\n' +
       '\n' +
-      '// ========== 阶段A：探索时期（无蚁巢，可能被天敌袭击） ==========\n' +
+      '// ========== 阶段A：探索时期（无蚁巢，寻找安全地点建巢）==========\n' +
       'const qState = api.getProperty("queenState");\n' +
       'if (qState === "explore") {\n' +
       '  // 扫描周围：发现敌人立刻逃跑；发现植物向植物移动；随机漫游\n' +
@@ -301,6 +305,7 @@
       '  api.setProperty("exploreTimer", qTimer);\n' +
       '\n' +
       '  // 满足建巢条件：停留足够久 + 能量 >= 100 + 附近无植物（开阔地）\n' +
+      '  // 超时强制建巢：即使附近有植物，3000帧（50秒）后也强制建巢（避免卡关）\n' +
       '  let nearPlant = false;\n' +
       '  for (let i = 0; i < nearby.length; i++) {\n' +
       '    const n = nearby[i];\n' +
@@ -309,7 +314,8 @@
       '      if (d < 100) { nearPlant = true; break; }\n' +
       '    }\n' +
       '  }\n' +
-      '  if (qTimer > 600 && (api.getProperty("energy") || 100) >= 100 && !nearPlant) {\n' +
+      '  const qCanBuild = (qTimer > 600 && (api.getProperty("energy") || 100) >= 100 && !nearPlant) || qTimer > 3000;\n' +
+      '  if (qCanBuild) {\n' +
       '    api.setProperty("queenState", "digesting");\n' +
       '    api.setProperty("digestTimer", 0);\n' +
       '  }\n' +
@@ -461,123 +467,47 @@
       '    const qAntX = qNestX + Math.cos(qAngle) * 30;\n' +
       '    const qAntY = qNestY + Math.sin(qAngle) * 30;\n' +
       '\n' +
-      '    // 新蚂蚁的简化行为代码（移动+觅食+躲避敌人+回巢）\n' +
-      '    let babyInit = \'if (!api.getProperty("initialized")) { api.setProperty("initialized", true); \' +\n' +
-      '      \'api.setProperty("name", \' + (qRole === "soldier" ? \'"兵蚁"\' : \'"工蚁"\') + \'); \' +\n' +
-      '      \'api.setProperty("species", \' + \'"\' + qSpecies + \'"\' + \'); \' +\n' +
-      '      \'api.setProperty("antId", true); \' +\n' +
-      '      \'api.setProperty("role", \' + \'"\' + qRole + \'"\' + \'); \' +\n' +
-      '      \'api.setProperty("colonyId", \' + \'"\' + qColony + \'"\' + \'); \' +\n' +
-      '      \'api.setProperty("speed", \' + (qRole === "soldier" ? \'0.75\' : \'0.7\') + \'); \' +\n' +
-      '      \'api.setColor("#2a1a0e"); api.setKind("creature"); api.setRadius(4); \' +\n' +
-      '      \'api.setProperty("energy", 100); \' +\n' +
-      '      \'api.setProperty("maxCarry", 15); \' +\n' +
-      '      \'api.setProperty("attackPower", \' + (qRole === "soldier" ? \'3\' : \'1\') + \'); \' +\n' +
-      '      \'api.setProperty("hp", \' + (qRole === "soldier" ? \'40\' : \'30\') + \'); \' +\n' +
-      '      \'api.setProperty("maxHp", \' + (qRole === "soldier" ? \'40\' : \'30\') + \'); \' +\n' +
-      '      \'api.setProperty("nestX", \' + qNestX.toFixed(1) + \'); \' +\n' +
-      '      \'api.setProperty("nestY", \' + qNestY.toFixed(1) + \'); \' +\n' +
-      '      \'api.registerDraw(function(ctx, r) { \' +\n' +
-      '      \'const dir = api.getProperty("direction") || 0; \' +\n' +
-      '      \'const headR = r * 0.35, bodyR = r * 0.25, thoraxR = r * 0.2, abdomenR = r * 0.4; \' +\n' +
-      '      \'const legLen = r * 0.6; \' +\n' +
-      '      \'const antColor = "#2a1a0e", legColor = "#3a2a1a"; \' +\n' +
-      '      \'ctx.save(); ctx.rotate(dir); \' +\n' +
-      '      \'ctx.fillStyle = antColor; \' +\n' +
-      '      \'ctx.beginPath(); ctx.ellipse(r * 0.45, 0, abdomenR, abdomenR * 0.7, 0, 0, Math.PI * 2); ctx.fill(); \' +\n' +
-      '      \'ctx.beginPath(); ctx.arc(r * 0.1, 0, thoraxR, 0, Math.PI * 2); ctx.fill(); \' +\n' +
-      '      \'ctx.beginPath(); ctx.arc(-r * 0.25, 0, headR, 0, Math.PI * 2); ctx.fill(); \' +\n' +
-      '      \'ctx.strokeStyle = antColor; ctx.lineWidth = Math.max(0.8, r * 0.06); \' +\n' +
-      '      \'ctx.beginPath(); ctx.moveTo(-r * 0.35, -headR * 0.3); ctx.quadraticCurveTo(-r * 0.55, -headR * 0.8, -r * 0.5, -headR * 1.2); ctx.stroke(); \' +\n' +
-      '      \'ctx.beginPath(); ctx.moveTo(-r * 0.35, headR * 0.3); ctx.quadraticCurveTo(-r * 0.55, headR * 0.8, -r * 0.5, headR * 1.2); ctx.stroke(); \' +\n' +
-      '      \'for (let i = 0; i < 3; i++) { \' +\n' +
-      '      \'const t = (i - 1) * 0.25; \' +\n' +
-      '      \'const side = i === 0 ? -1 : (i === 2 ? 1 : 0); \' +\n' +
-      '      \'if (side === 0) continue; \' +\n' +
-      '      \'const startX = r * t, startY = bodyR * 0.5; \' +\n' +
-      '      \'const femurAngle = side * 0.5; \' +\n' +
-      '      \'const femurEndX = startX + Math.cos(femurAngle) * legLen * 0.4; \' +\n' +
-      '      \'const femurEndY = startY + side * legLen * 0.3; \' +\n' +
-      '      \'ctx.strokeStyle = legColor; ctx.lineWidth = Math.max(0.8, r * 0.04); \' +\n' +
-      '      \'ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(femurEndX, femurEndY); ctx.stroke(); \' +\n' +
-      '      \'const tibiaAngle = femurAngle + side * 0.7; \' +\n' +
-      '      \'const tibiaEndX = femurEndX + Math.cos(tibiaAngle) * legLen * 0.35; \' +\n' +
-      '      \'const tibiaEndY = femurEndY + side * legLen * 0.25; \' +\n' +
-      '      \'ctx.beginPath(); ctx.moveTo(femurEndX, femurEndY); ctx.lineTo(tibiaEndX, tibiaEndY); ctx.stroke(); \' +\n' +
-      '      \'} \' +\n' +
-      '      \'ctx.restore(); \' +\n' +
-      '      \'}); \' +\n' +
-      '      \'}\';\n' +
+      '    // 新蚂蚁的简化行为代码（大幅简化，避免过长嵌套字符串）\n' +
+      '    const babyNestX = qNestX.toFixed(1);\n' +
+      '    const babyNestY = qNestY.toFixed(1);\n' +
+      '    const babyName = qRole === "soldier" ? "兵蚁" : "工蚁";\n' +
+      '    const babySpeed = qRole === "soldier" ? "0.75" : "0.7";\n' +
+      '    const babyAtk = qRole === "soldier" ? "3" : "1";\n' +
+      '    const babyHp = qRole === "soldier" ? "40" : "30";\n' +
       '\n' +
-      '    const babyBehavior = qRole === "soldier"\n' +
-      '      // 兵蚁：巡逻 + 追击敌人 + 低血量回巢\n' +
-      '      ? \'api.on("attack", function(d) { if (!d || !d.damage) return; const nHp = Math.max(0, (api.getProperty("hp") || 40) - Math.round(d.damage * 0.85)); api.setProperty("hp", nHp); if (nHp <= 0) api.destroyCell(api.getProperty("id")); }); \' +\n' +
-      '        \'const nbA = api.findAllWithinRadius(api.getX(), api.getY(), 120); \' +\n' +
-      '        \'let foeA = null, foeD = Infinity; \' +\n' +
-      '        \'for (let iA = 0; iA < nbA.length; iA++) { \' +\n' +
-      '        \'  const cA = nbA[iA]; \' +\n' +
-      '        \'  if (cA.attributes && (cA.attributes.hostile || (cA.attributes.antId && cA.attributes.colonyId && cA.attributes.colonyId !== "\' + qColony + \'"))) { \' +\n' +
-      '        \'    const dd = Math.hypot(cA.x - api.getX(), cA.y - api.getY()); \' +\n' +
-      '        \'    if (dd < foeD) { foeD = dd; foeA = cA; } \' +\n' +
-      '        \'  } \' +\n' +
-      '        \'} \' +\n' +
-      '        \'let adxA = 0, adyA = 0, aDirA = api.getProperty("direction") || 0; \' +\n' +
-      '        \'if ((api.getProperty("hp") || 40) < 10) { \' +\n' +
-      '        \'  adxA = (api.getProperty("nestX") || 0) - api.getX(); \' +\n' +
-      '        \'  adyA = (api.getProperty("nestY") || 0) - api.getY(); \' +\n' +
-      '        \'} else if (foeA) { \' +\n' +
-      '        \'  adxA = foeA.x - api.getX(); adyA = foeA.y - api.getY(); \' +\n' +
-      '        \'  if (foeD < 20 && api.getFrame() % 120 === 0) api.emitCellEvent(foeA.id, "attack", { damage: api.getProperty("attackPower") || 3, sourceId: api.getProperty("id") }); \' +\n' +
-      '        \'} else { \' +\n' +
-      '        \'  if (api.getFrame() % 60 === 0) aDirA += (Math.random() - 0.5) * 0.25; \' +\n' +
-      '        \'  adxA = Math.cos(aDirA); adyA = Math.sin(aDirA); api.setProperty("direction", aDirA); \' +\n' +
-      '        \'} \' +\n' +
-      '        \'const aMvA = Math.sqrt(adxA*adxA + adyA*adyA) || 1; \' +\n' +
-      '        \'api.setPosition(api.getX() + adxA/aMvA * 0.75, api.getY() + adyA/aMvA * 0.75); \' +\n' +
-      '        \'if (api.getFrame() % 600 === 0) api.setProperty("energy", Math.max(0, (api.getProperty("energy") || 100) - 1)); \'\n' +
-      '      // 工蚁：觅食 + 回巢 + 躲避敌人\n' +
-      '      : \'api.on("attack", function(d) { if (!d || !d.damage) return; const nHp = Math.max(0, (api.getProperty("hp") || 30) - Math.round(d.damage * 0.85)); api.setProperty("hp", nHp); if (nHp <= 0) api.destroyCell(api.getProperty("id")); }); \' +\n' +
-      '        \'const nbA = api.findAllWithinRadius(api.getX(), api.getY(), 120); \' +\n' +
-      '        \'let foeA = null, foeD = Infinity, foodA = null, foodD2 = Infinity; \' +\n' +
-      '        \'for (let iA = 0; iA < nbA.length; iA++) { \' +\n' +
-      '        \'  const cA = nbA[iA]; \' +\n' +
-      '        \'  if (cA.attributes && cA.attributes.hostile) { \' +\n' +
-      '        \'    const dd = Math.hypot(cA.x - api.getX(), cA.y - api.getY()); \' +\n' +
-      '        \'    if (dd < foeD) { foeD = dd; foeA = cA; } \' +\n' +
-      '        \'  } else if (cA.attributes && (cA.attributes.seedEnergy > 0 || cA.attributes.energyValue > 0)) { \' +\n' +
-      '        \'    const dd = Math.hypot(cA.x - api.getX(), cA.y - api.getY()); \' +\n' +
-      '        \'    if (dd < foodD2) { foodD2 = dd; foodA = cA; } \' +\n' +
-      '        \'  } \' +\n' +
-      '        \'} \' +\n' +
-      '        \'let adxA = 0, adyA = 0, aDirA = api.getProperty("direction") || 0, aStateA = api.getProperty("antState") || "idle"; \' +\n' +
-      '        \'const aCarried = api.getProperty("foodCarried") || 0; \' +\n' +
-      '        \'if (foeA && aCarried > 0) { \' +\n' +
-      '        \'  adxA = api.getX() - foeA.x; adyA = api.getY() - foeA.y; \' +\n' +
-      '        \'  // 有携带食物被敌人接近：回巢（放弃食物也不回？其实应该逃跑） \' +\n' +
-      '        \'} else if (foeA && aCarried === 0) { \' +\n' +
-      '        \'  adxA = api.getX() - foeA.x; adyA = api.getY() - foeA.y;  // 空手被追 → 逃跑 \' +\n' +
-      '        \'} else if (aCarried > 0) { \' +\n' +
-      '        \'  adxA = (api.getProperty("nestX") || 0) - api.getX(); adyA = (api.getProperty("nestY") || 0) - api.getY(); api.setProperty("nestX", api.getX()); api.setProperty("nestY", api.getY()); \' +\n' +
-      '        \'  /* 到巢边：交付食物 */\' +\n' +
-      '        \'  const distToNest2 = Math.sqrt(adxA*adxA + adyA*adyA); \' +\n' +
-      '        \'  if (distToNest2 < 45) { \' +\n' +
-      '        \'    api.setProperty("foodCarried", 0); \' +\n' +
-      '        \'    api.setProperty("antState", "idle"); \' +\n' +
-      '        \'  } \' +\n' +
-      '        \'} else if (foodA) { \' +\n' +
-      '        \'  adxA = foodA.x - api.getX(); adyA = foodA.y - api.getY(); \' +\n' +
-      '        \'  if (foodD2 < 12 && api.getFrame() % 60 === 0) { \' +\n' +
-      '        \'    api.setProperty("foodCarried", 15); \' +\n' +
-      '        \'    api.destroyCell(foodA.id); \' +\n' +
-      '        \'  } \' +\n' +
-      '        \'} else { \' +\n' +
-      '        \'  if (api.getFrame() % 60 === 0) aDirA += (Math.random() - 0.5) * 0.3; \' +\n' +
-      '        \'  adxA = Math.cos(aDirA); adyA = Math.sin(aDirA); api.setProperty("direction", aDirA); \' +\n' +
-      '        \'} \' +\n' +
-      '        \'const aMvA = Math.sqrt(adxA*adxA + adyA*adyA) || 1; \' +\n' +
-      '        \'api.setPosition(api.getX() + adxA/aMvA * 0.7, api.getY() + adyA/aMvA * 0.7); \' +\n' +
-      '        \'if (api.getFrame() % 600 === 0) api.setProperty("energy", Math.max(0, (api.getProperty("energy") || 100) - 1)); \' +\n' +
-      '        \'if ((api.getProperty("energy") || 100) <= 0) api.destroyCell(api.getProperty("id")); \';\n' +
+      '    let babyInit = \'if(!api.getProperty("initialized")){api.setProperty("initialized",true);\' +\n' +
+      '      \'api.setProperty("name","\' + babyName + \'");\' +\n' +
+      '      \'api.setProperty("species","\' + qSpecies + \'");\' +\n' +
+      '      \'api.setProperty("antId",true);\' +\n' +
+      '      \'api.setProperty("role","\' + qRole + \'");\' +\n' +
+      '      \'api.setProperty("colonyId","\' + qColony + \'");\' +\n' +
+      '      \'api.setProperty("speed",\' + babySpeed + \');\' +\n' +
+      '      \'api.setColor("#2a1a0e");api.setKind("creature");api.setRadius(4);\' +\n' +
+      '      \'api.setProperty("energy",100);\' +\n' +
+      '      \'api.setProperty("maxCarry",15);\' +\n' +
+      '      \'api.setProperty("attackPower",\' + babyAtk + \');\' +\n' +
+      '      \'api.setProperty("hp",\' + babyHp + \');\' +\n' +
+      '      \'api.setProperty("maxHp",\' + babyHp + \');\' +\n' +
+      '      \'api.setProperty("nestX",\' + babyNestX + \');\' +\n' +
+      '      \'api.setProperty("nestY",\' + babyNestY + \');\' +\n' +
+      '      \'api.registerDraw(function(ctx,r){ctx.save();ctx.rotate(api.getProperty("direction")||0);\' +\n' +
+      '      \'ctx.fillStyle="#2a1a0e";ctx.beginPath();ctx.arc(0,0,r*0.5,0,Math.PI*2);ctx.fill();\' +\n' +
+      '      \'ctx.beginPath();ctx.arc(r*0.4,0,r*0.3,0,Math.PI*2);ctx.fill();\' +\n' +
+      '      \'ctx.beginPath();ctx.arc(-r*0.4,0,r*0.35,0,Math.PI*2);ctx.fill();ctx.restore();});}\';\n' +
+      '\n' +
+      '    // 兵蚁：巡逻+追击敌人；工蚁：觅食+回巢+躲避敌人\n' +
+      '    let babyBehavior;\n' +
+      '    if (qRole === "soldier") {\n' +
+      '      babyBehavior = \'api.on("attack",function(d){if(!d||!d.damage)return;var h=Math.max(0,(api.getProperty("hp")||\' + babyHp + \')-Math.round(d.damage*0.85));api.setProperty("hp",h);if(h<=0)api.destroyCell(api.getProperty("id"));});\' +\n' +
+      '        \'var nb=api.findAllWithinRadius(api.getX(),api.getY(),120);var f=null,fd=Infinity;for(var i=0;i<nb.length;i++){var c=nb[i];if(c.attributes&&(c.attributes.hostile||(c.attributes.antId&&c.attributes.colonyId&&c.attributes.colonyId!=="\' + qColony + \'"))){var dd=Math.hypot(c.x-api.getX(),c.y-api.getY());if(dd<fd){fd=dd;f=c;}}}\' +\n' +
+      '        \'var dx=0,dy=0,dir=api.getProperty("direction")||0;if((api.getProperty("hp")||\' + babyHp + \')<10){dx=(api.getProperty("nestX")||0)-api.getX();dy=(api.getProperty("nestY")||0)-api.getY();}else if(f){dx=f.x-api.getX();dy=f.y-api.getY();if(fd<20&&api.getFrame()%120===0)api.emitCellEvent(f.id,"attack",{damage:api.getProperty("attackPower")||\' + babyAtk + \',sourceId:api.getProperty("id")});}else{if(api.getFrame()%60===0)dir+=(Math.random()-0.5)*0.25;dx=Math.cos(dir);dy=Math.sin(dir);api.setProperty("direction",dir);}\' +\n' +
+      '        \'var mv=Math.sqrt(dx*dx+dy*dy)||1;api.setPosition(api.getX()+dx/mv*0.75,api.getY()+dy/mv*0.75);if(api.getFrame()%600===0)api.setProperty("energy",Math.max(0,(api.getProperty("energy")||100)-1));\';\n' +
+      '    } else {\n' +
+      '      babyBehavior = \'api.on("attack",function(d){if(!d||!d.damage)return;var h=Math.max(0,(api.getProperty("hp")||\' + babyHp + \')-Math.round(d.damage*0.85));api.setProperty("hp",h);if(h<=0)api.destroyCell(api.getProperty("id"));});\' +\n' +
+      '        \'var nb=api.findAllWithinRadius(api.getX(),api.getY(),120);var foe=null,foeD=Infinity,food=null,foodD=Infinity;for(var i=0;i<nb.length;i++){var c=nb[i];if(c.attributes&&c.attributes.hostile){var dd=Math.hypot(c.x-api.getX(),c.y-api.getY());if(dd<foeD){foeD=dd;foe=c;}}else if(c.attributes&&(c.attributes.seedEnergy>0||c.attributes.energyValue>0)){var dd2=Math.hypot(c.x-api.getX(),c.y-api.getY());if(dd2<foodD){foodD=dd2;food=c;}}}\' +\n' +
+      '        \'var dx=0,dy=0,dir=api.getProperty("direction")||0,carry=api.getProperty("foodCarried")||0;if(foe&&carry>0){dx=api.getX()-foe.x;dy=api.getY()-foe.y;}else if(foe&&carry===0){dx=api.getX()-foe.x;dy=api.getY()-foe.y;}else if(carry>0){dx=(api.getProperty("nestX")||0)-api.getX();dy=(api.getProperty("nestY")||0)-api.getY();var dn=Math.sqrt(dx*dx+dy*dy);if(dn<45){api.setProperty("foodCarried",0);}}else if(food){dx=food.x-api.getX();dy=food.y-api.getY();if(foodD<12&&api.getFrame()%60===0){api.setProperty("foodCarried",15);api.destroyCell(food.id);}}else{if(api.getFrame()%60===0)dir+=(Math.random()-0.5)*0.3;dx=Math.cos(dir);dy=Math.sin(dir);api.setProperty("direction",dir);}\' +\n' +
+      '        \'var mv=Math.sqrt(dx*dx+dy*dy)||1;api.setPosition(api.getX()+dx/mv*0.7,api.getY()+dy/mv*0.7);if(api.getFrame()%600===0)api.setProperty("energy",Math.max(0,(api.getProperty("energy")||100)-1));if((api.getProperty("energy")||100)<=0)api.destroyCell(api.getProperty("id"));\';\n' +
+      '    }\n' +
       '\n' +
       '    api.createCell({\n' +
       '      kind: "creature",\n' +
