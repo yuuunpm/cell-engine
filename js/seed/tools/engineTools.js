@@ -435,6 +435,8 @@
           antAttrs.exploreTimer = 0;
           antAttrs.nestX = qx;
           antAttrs.nestY = qy;
+          // 蚁后自身不参与碰撞推挤，避免被推到巢穴边缘或被工蚁撞飞
+          antAttrs.softRadius = 0;
 
           _cellCore.updateCell(cell.id, {
             name: '蚁后（' + (sp.name || speciesKey) + '）',
@@ -444,6 +446,17 @@
             codeMode: 'continuous',
             attributes: antAttrs
           });
+
+          // 关键修复：必须设置 triggerConfig.mode = 'continuous'
+          // 否则 gameLoop.getContinuousCells() 不会返回此基圆，代码永远不会执行
+          if (typeof _cellCore.setTriggerMode === 'function') {
+            _cellCore.setTriggerMode(cell.id, 'continuous');
+          } else {
+            const rawCell = _cellCore.getCell(cell.id);
+            if (rawCell && rawCell.triggerConfig) {
+              rawCell.triggerConfig.mode = 'continuous';
+            }
+          }
 
           _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'continuous');
 
@@ -506,7 +519,16 @@
           _cellCore.setAttribute(cell.id, 'species', speciesKey);
           _cellCore.setAttribute(cell.id, 'category', 'plant');
 
-          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'event');
+          // 植物需要 pulse 模式才能执行定时逻辑（生长、散播种子）
+          if (typeof _cellCore.setTriggerMode === 'function') {
+            _cellCore.setTriggerMode(cell.id, 'pulse');
+          } else {
+            const rawCell = _cellCore.getCell(cell.id);
+            if (rawCell && rawCell.triggerConfig) {
+              rawCell.triggerConfig.mode = 'pulse';
+            }
+          }
+          _sandbox.loadBehaviorCode(cell.id, behaviorCode, 'pulse');
 
           return {
             ok: true,
