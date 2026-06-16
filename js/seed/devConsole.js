@@ -1488,7 +1488,6 @@ const DevConsole = (() => {
       name: '蚁后（正在探索）',
       color: '#5c3a0a',
       radius: 8,
-      kind: 'creature',
       code: queenBehavior || _getDefaultQueenBehavior(),
       codeMode: 'continuous',
       attributes: {
@@ -1500,7 +1499,8 @@ const DevConsole = (() => {
         speed: 0.5,
         hp: 50,
         maxHp: 50,
-        energy: 150,
+        maxEnergy: 300,
+        energy: 300,        // 蚁后从巢穴取食，不依赖外部觅食，初始给足
         initialized: false,
         queenState: 'explore',
         exploreTimer: 0,
@@ -1509,9 +1509,26 @@ const DevConsole = (() => {
         digestTimer: 0,
         buildTimer: 0,
         nestX: qx,
-        nestY: qy
+        nestY: qy,
+        softRadius: 0  // 蚁后不参与碰撞推挤，避免被推到巢穴边缘
       }
     });
+
+    // 关键修复：必须设置 triggerConfig.mode = 'continuous'
+    // 否则 gameLoop.getContinuousCells() 不会返回此基圆，代码永远不会执行
+    if (typeof _cellCore.setTriggerMode === 'function') {
+      _cellCore.setTriggerMode(cell.id, 'continuous');
+    } else {
+      const rawCell = _cellCore.getCell(cell.id);
+      if (rawCell && rawCell.triggerConfig) {
+        rawCell.triggerConfig.mode = 'continuous';
+      }
+    }
+
+    // 加载行为代码到 Worker sandbox
+    if (typeof _sandbox !== 'undefined' && typeof _sandbox.loadBehaviorCode === 'function') {
+      _sandbox.loadBehaviorCode(cell.id, queenBehavior || _getDefaultQueenBehavior(), 'continuous');
+    }
 
     // 视口跟随到蚁后位置
     if (typeof window.RenderBridge !== 'undefined' &&
