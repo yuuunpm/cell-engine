@@ -99,7 +99,7 @@
         body += 'ctx.arc(_headX+r*0.78,_headY+r*0.06,1.4,0,Math.PI*2);ctx.fill();';
         body += 'var _tailX=_startX-_segW*0.5,_tailY=_bodyY(0);';
         body += 'ctx.fillStyle="' + (spotColor === '#1a1a1a' ? '#4a1a0d' : spotColor) + '";';
-        body += 'ctx.beginPath();ctx.ellipse(_tailX,_tailY,r*0.18,r*0.18,0,Math.PI*2);ctx.fill();';
+        body += 'ctx.beginPath();ctx.ellipse(_tailX,_tailY,r*0.18,r*0.18,0,0,Math.PI*2);ctx.fill();';
         body += 'ctx.strokeStyle="' + spotColor + '";ctx.lineWidth=0.6;ctx.stroke();';
         break;
 
@@ -180,6 +180,10 @@
       '\n';
 
     // 基本属性初始化（所有昆虫共享）
+    // softRadius 设置：捕食型昆虫(敌对+瓢虫+蚁狮)设为 0 → 能"压"上猎物攻击
+    // 蚜虫和菜粉蝶保留默认 → 让它们能被推开，符合"小昆虫躲避大型生物"现实
+    const isPredator = (hostile === 'true' || key === 'coccinella_septempunctata' || key === 'myrmeleon');
+    const softRadiusSetting = isPredator ? '0' : 'null';
     const initBlock =
       'if (!api.getProperty("initialized")) {\n' +
       '  api.setProperty("initialized", true);\n' +
@@ -191,6 +195,7 @@
       '  api.setColor("' + sp.color + '");\n' +
       '  api.setProperty("spotColor", "' + (sp.spotColor || '#1a1a1a') + '");\n' +
       '  api.setRadius(' + sp.size + ');\n' +
+      (isPredator ? '  api.setProperty("softRadius", 0);  // 捕食者：不推开猎物，能压上\n' : '') +
       '  api.setProperty("hp", ' + (30 + sp.energyValue) + ');\n' +
       '  api.setProperty("maxHp", ' + (30 + sp.energyValue) + ');\n' +
       '  api.setProperty("attackPower", ' + sp.attackPower + ');\n' +
@@ -221,23 +226,22 @@
     if (key === 'myrmeleon') {
       // 蚁狮：静态陷阱伏击
       behavior =
-        '// ========== 蚁狮行为：静态陷阱 ==========\n' +
-        '// 不移动，守在原地。附近经过的蚂蚁会被拖拽袭击\n' +
+        '// ========== 蚁狮行为：静态陷阱伏击 ==========\n' +
+        '// 守在原地挖陷阱，蚂蚁掉入陷阱后突袭\n' +
         '\n' +
-        '// 扩大陷阱外观：半径 = 20（比默认8更大）\n' +
+        '// 初始化陷阱尺寸\n' +
         'if (!api.getProperty("_trapSizeSet")) {\n' +
         '  api.setProperty("_trapSizeSet", true);\n' +
         '  api.setRadius(20);\n' +
         '  api.setProperty("speed", 0);\n' +
         '}\n' +
         '\n' +
-        '// 陷阱伏击：检查半径内是否有蚂蚁\n' +
+        '// 陷阱伏击：检查陷阱半径内是否有蚂蚁\n' +
         'if (api.getFrame() % 30 === 0) {\n' +
         '  const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 30);\n' +
         '  for (let i = 0; i < nearby.length; i++) {\n' +
         '    const nc = nearby[i];\n' +
         '    if (nc.attributes && (nc.attributes.antId || nc.attributes.species === "ant")) {\n' +
-        '      // 伏击：发起攻击\n' +
         '      api.setProperty("lastAttack", api.getFrame());\n' +
         '      try {\n' +
         '        if (typeof api.attack === "function") {\n' +
@@ -251,22 +255,139 @@
         '  }\n' +
         '}\n' +
         '\n';
-    } else if (hostile === 'true') {
-      // 敌对昆虫通用战斗行为（狼蛛、蜈蚣、虎甲、胡蜂）
+    } else if (key === 'aphid') {
+      // ========== 蚜虫行为：绑定植物，几乎不动 ==========
+      // 现实：蚜虫用口针刺入植物组织吸食汁液，几乎不移动
+      // 群居在植物嫩茎/叶背，遇到天敌无能为力（靠蚂蚁保护）
+      // 物理：immovable=true + 紧贴植物 → 不会被树/蚂蚁推开
       behavior =
-        '// ========== 敌对昆虫行为：漫游 + 主动攻击蚂蚁 ==========\n' +
-        'const speed = api.getProperty("speed") || 0.5;\n' +
-        'const dir = api.getProperty("direction") || 0;\n' +
-        'const agg = api.getProperty("aggression") || 0.5;\n' +
+        '// ========== 蚜虫行为：绑定植物 · 紧贴不动 ==========\n' +
+        '// 初始化：记录依附的植物位置，速度降至极低，设为不可移动\n' +
+        'if (!api.getProperty("_plantHost")) {\n' +
+        '  api.setProperty("_plantHost", true);\n' +
+        '  api.setProperty("speed", 0);\n' +
+        '  // 寻找最近植物，记录位置\n' +
+        '  const hostPlants = api.findAllWithinRadius(api.getX(), api.getY(), 200);\n' +
+        '  let nearestP = null; let pd = Infinity;\n' +
+        '  for (let i = 0; i < hostPlants.length; i++) {\n' +
+        '    const n = hostPlants[i];\n' +
+        '    if (n.kind === "plant" && n.attributes && n.attributes.type !== "seed") {\n' +
+        '      const d = Math.hypot(n.x - api.getX(), n.y - api.getY());\n' +
+        '      if (d < pd) { pd = d; nearestP = n; }\n' +
+        '    }\n' +
+        '  }\n' +
+        '  if (nearestP) {\n' +
+        '    // 记录植物ID和植物表面位置（贴到植物边缘）\n' +
+        '    api.setProperty("_hostId", nearestP.id);\n' +
+        '    const a = Math.atan2(api.getY() - nearestP.y, api.getX() - nearestP.x);\n' +
+        '    const surX = nearestP.x + Math.cos(a) * (nearestP.radius + 2);\n' +
+        '    const surY = nearestP.y + Math.sin(a) * (nearestP.radius + 2);\n' +
+        '    api.setProperty("_hostX", surX);\n' +
+        '    api.setProperty("_hostY", surY);\n' +
+        '    api.setPosition(surX, surY);\n' +
+        '  }\n' +
+        '}\n' +
         '\n' +
-        '// 寻找附近蚂蚁作为目标\n' +
-        'let targetCell = null;\n' +
-        'let minDist = Infinity;\n' +
+        '// 每帧：若被推离，强制拉回植物表面\n' +
+        'const hostX = api.getProperty("_hostX");\n' +
+        'const hostY = api.getProperty("_hostY");\n' +
+        'if (hostX != null && hostY != null) {\n' +
+        '  const dx = api.getX() - hostX;\n' +
+        '  const dy = api.getY() - hostY;\n' +
+        '  const drift = Math.hypot(dx, dy);\n' +
+        '  if (drift > 1.5) {\n' +
+        '    // 被推离了，强制拉回（线性回拉）\n' +
+        '    api.setPosition(hostX, hostY);\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        '// 极微量"晃动"：仅改变方向不移动（模拟取食动作）\n' +
+        'if (api.getFrame() % 180 === 0) {\n' +
+        '  api.setProperty("direction", (api.getProperty("direction") || 0) + (Math.random() - 0.5) * 0.3);\n' +
+        '}\n' +
+        '\n';
+    } else if (key === 'coccinella_septempunctata') {
+      // ========== 七星瓢虫行为：捕食蚜虫 + 逃跑 ==========
+      // 现实：主要捕食蚜虫，遇到蚂蚁/敌害时装死或逃跑
+      behavior =
+        '// ========== 七星瓢虫行为：捕食蚜虫 + 逃避蚂蚁 ==========\n' +
+        'const speed = api.getProperty("speed") || 0.45;\n' +
+        'let dir = api.getProperty("direction") || 0;\n' +
+        '\n' +
+        '// 检测附近威胁（敌对昆虫 + 蚂蚁）\n' +
         'if (api.getFrame() % 20 === 0) {\n' +
-        '  const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 80);\n' +
+        '  const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 60);\n' +
+        '  let threatX = 0, threatY = 0, hasThreat = false;\n' +
+        '  let aphidTarget = null, aphidDist = Infinity;\n' +
+        '\n' +
         '  for (let i = 0; i < nearby.length; i++) {\n' +
         '    const nc = nearby[i];\n' +
-        '    if (nc.attributes && (nc.attributes.antId || nc.attributes.species === "ant")) {\n' +
+        '    if (nc.id === api.getProperty("id")) continue;\n' +
+        '    const attr = nc.attributes || {};\n' +
+        '\n' +
+        '    // 威胁检测：敌对昆虫或蚂蚁\n' +
+        '    if (attr.hostile || attr.antId) {\n' +
+        '      threatX += nc.x - api.getX();\n' +
+        '      threatY += nc.y - api.getY();\n' +
+        '      hasThreat = true;\n' +
+        '    }\n' +
+        '\n' +
+        '    // 猎物检测：蚜虫\n' +
+        '    if (attr.species === "aphid") {\n' +
+        '      const d = Math.hypot(nc.x - api.getX(), nc.y - api.getY());\n' +
+        '      if (d < aphidDist) { aphidDist = d; aphidTarget = nc; }\n' +
+        '    }\n' +
+        '  }\n' +
+        '\n' +
+        '  // 有威胁 → 逃跑（优先级最高）\n' +
+        '  if (hasThreat) {\n' +
+        '    const escapeAngle = Math.atan2(-threatY, -threatX);\n' +
+        '    api.setProperty("direction", escapeAngle);\n' +
+        '    dir = escapeAngle;\n' +
+        '  } else if (aphidTarget) {\n' +
+        '    // 有蚜虫 → 追击捕食\n' +
+        '    if (aphidDist < 12 && api.getFrame() % 30 === 0) {\n' +
+        '      // 捕食：销毁蚜虫\n' +
+        '      try { api.destroyCell(aphidTarget.id); } catch (e) {}\n' +
+        '    } else {\n' +
+        '      // 走向蚜虫\n' +
+        '      const chaseAngle = Math.atan2(aphidTarget.y - api.getY(), aphidTarget.x - api.getX());\n' +
+        '      api.setProperty("direction", chaseAngle);\n' +
+        '      dir = chaseAngle;\n' +
+        '    }\n' +
+        '  } else {\n' +
+        '    // 无目标 → 随机飞行寻找\n' +
+        '    if (Math.random() < 0.03) {\n' +
+        '      dir = dir + (Math.random() - 0.5) * 1.5;\n' +
+        '      api.setProperty("direction", dir);\n' +
+        '    }\n' +
+        '  }\n' +
+        '}\n' +
+        '\n' +
+        '// 移动\n' +
+        'api.setPosition(api.getX() + Math.cos(dir) * speed, api.getY() + Math.sin(dir) * speed);\n' +
+        '\n';
+    } else if (hostile === 'true') {
+      // 敌对昆虫通用战斗行为（狼蛛、蜈蚣、虎甲、胡蜂）
+      // 现实：主动捕食蚂蚁+其他昆虫，各有侧重
+      // 狼蛛伏击型→探测半径小(50px)；虎甲高速→探测半径大(100px)
+      const detectRadius = (key === 'theraphosidae') ? 50 : (key === 'cicindela') ? 100 : 80;
+      behavior =
+        '// ========== 敌对昆虫行为：追猎蚂蚁 + 其他昆虫 ==========\n' +
+        'const speed = api.getProperty("speed") || 0.5;\n' +
+        'const dir = api.getProperty("direction") || 0;\n' +
+        '\n' +
+        '// 寻找附近猎物（蚂蚁 + 其他昆虫）\n' +
+        'let targetCell = null;\n' +
+        'let minDist = Infinity;\n' +
+        'if (api.getFrame() % 15 === 0) {\n' +
+        '  const nearby = api.findAllWithinRadius(api.getX(), api.getY(), ' + detectRadius + ');\n' +
+        '  for (let i = 0; i < nearby.length; i++) {\n' +
+        '    const nc = nearby[i];\n' +
+        '    if (nc.id === api.getProperty("id")) continue;\n' +
+        '    const attr = nc.attributes || {};\n' +
+        '    // 猎物：蚂蚁（优先）或普通昆虫（蚜虫、瓢虫等）\n' +
+        '    if (attr.antId || nc.kind === "insect") {\n' +
         '      const d = Math.hypot(nc.x - api.getX(), nc.y - api.getY());\n' +
         '      if (d < minDist) { minDist = d; targetCell = nc; }\n' +
         '    }\n' +
@@ -278,10 +399,9 @@
         '  }\n' +
         '}\n' +
         '\n' +
-        '// 有目标时追击目标\n' +
+        '// 有目标时追击\n' +
         'const targetId = api.getProperty("targetId");\n' +
         'if (targetId) {\n' +
-        '  // 追击方向\n' +
         '  const targetCell2 = api.findCellById ? api.findCellById(targetId) : null;\n' +
         '  let chaseX = api.getX(), chaseY = api.getY();\n' +
         '  if (targetCell2) {\n' +
@@ -289,7 +409,6 @@
         '    const ndx = chaseX - api.getX(), ndy = chaseY - api.getY();\n' +
         '    const nd = Math.hypot(ndx, ndy) || 1;\n' +
         '    api.setPosition(api.getX() + (ndx/nd) * speed, api.getY() + (ndy/nd) * speed);\n' +
-        '    // 攻击范围检测\n' +
         '    if (nd < 15 && api.getFrame() % 30 < 3) {\n' +
         '      try {\n' +
         '        if (typeof api.attack === "function") {\n' +
@@ -300,7 +419,6 @@
         '      } catch (e) {}\n' +
         '    }\n' +
         '  } else {\n' +
-        '    // 目标丢失，随机漫游\n' +
         '    if (Math.random() < 0.02) {\n' +
         '      api.setProperty("direction", Math.random() * Math.PI * 2);\n' +
         '    }\n' +
@@ -317,7 +435,7 @@
         '}\n' +
         '\n';
     } else {
-      // 温和昆虫行为（瓢虫、菜粉蝶、蚜虫）
+      // 其他温和昆虫行为（菜粉蝶等）
       behavior =
         '// ========== 温和昆虫行为：随机漫游，被攻击时逃跑 ==========\n' +
         'const speed = api.getProperty("speed") || 0.4;\n' +
@@ -329,21 +447,21 @@
         '  api.setProperty("direction", dir);\n' +
         '}\n' +
         '\n' +
-        '// 检测是否有敌人（敌对昆虫或蚂蚁）靠近\n' +
-        'if (api.getFrame() % 30 === 0) {\n' +
+        '// 检测威胁（敌对昆虫 + 蚂蚁）\n' +
+        'if (api.getFrame() % 20 === 0) {\n' +
         '  const nearby = api.findAllWithinRadius(api.getX(), api.getY(), 50);\n' +
         '  let threatX = 0, threatY = 0, hasThreat = false;\n' +
         '  for (let i = 0; i < nearby.length; i++) {\n' +
         '    const nc = nearby[i];\n' +
         '    if (nc.id === api.getProperty("id")) continue;\n' +
-        '    if (nc.attributes && nc.attributes.hostile) {\n' +
+        '    const attr = nc.attributes || {};\n' +
+        '    if (attr.hostile || attr.antId) {\n' +
         '      threatX += nc.x - api.getX();\n' +
         '      threatY += nc.y - api.getY();\n' +
         '      hasThreat = true;\n' +
         '    }\n' +
         '  }\n' +
         '  if (hasThreat) {\n' +
-        '    // 逃跑方向\n' +
         '    const escapeAngle = Math.atan2(-threatY, -threatX);\n' +
         '    api.setProperty("direction", escapeAngle);\n' +
         '    dir = escapeAngle;\n' +
