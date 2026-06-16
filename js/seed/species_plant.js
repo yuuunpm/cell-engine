@@ -288,7 +288,7 @@
       '  }',
       '}',
     ];
-    return lines.join('\\\\n');
+    return lines.join('\n');
   }
 
   // ===== 导出植物相关 API =====
