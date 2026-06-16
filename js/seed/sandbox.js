@@ -231,11 +231,21 @@ const Sandbox = (() => {
           // 坐标
           getX() {
             const cache = cellPropertyCache[cellId] || {};
-            return typeof cache.x === 'number' ? cache.x : 0;
+            if (typeof cache.x === 'number') {
+              return cache.x;
+            }
+            // 如果缓存中没有坐标，请求主线程获取
+            postCommand(cellId, 'getProperty', { key: 'x' });
+            return 0;
           },
           getY() {
             const cache = cellPropertyCache[cellId] || {};
-            return typeof cache.y === 'number' ? cache.y : 0;
+            if (typeof cache.y === 'number') {
+              return cache.y;
+            }
+            // 如果缓存中没有坐标，请求主线程获取
+            postCommand(cellId, 'getProperty', { key: 'y' });
+            return 0;
           },
           setPosition(x, y) {
             if (!cellPropertyCache[cellId]) cellPropertyCache[cellId] = {};
@@ -817,18 +827,34 @@ const Sandbox = (() => {
           break;
 
         case 'createCell':
-          // 创建新基圆，支持选项：kind, x, y, parentId, code
+          // 创建新基圆，支持选项：kind, x, y, parentId, code, mode, name, color, radius, attributes
           const newCell = _cellCore.createCell(
             args.kind || 'empty',
             args.x || 0,
             args.y || 0,
             args.parentId || null
           );
-          // 如果有代码，加载代码
-          if (newCell && args.code) {
-            const mode = args.mode || 'event';
-            loadBehaviorCode(newCell.id, args.code, mode);
-            _cellCore.updateCell(newCell.id, { code: args.code });
+          if (newCell) {
+            // 应用可选属性：name/color/radius
+            const cellUpdates = {};
+            if (args.name !== undefined) cellUpdates.name = args.name;
+            if (args.color !== undefined) cellUpdates.color = args.color;
+            if (typeof args.radius === 'number') cellUpdates.radius = args.radius;
+            if (Object.keys(cellUpdates).length > 0) {
+              _cellCore.updateCell(newCell.id, cellUpdates);
+            }
+            // 应用自定义 attributes
+            if (args.attributes && typeof args.attributes === 'object') {
+              for (const [ak, av] of Object.entries(args.attributes)) {
+                _cellCore.setAttribute(newCell.id, ak, av);
+              }
+            }
+            // 如果有代码，加载代码
+            if (args.code) {
+              const mode = args.mode || 'event';
+              loadBehaviorCode(newCell.id, args.code, mode);
+              _cellCore.updateCell(newCell.id, { code: args.code });
+            }
           }
           // 发送创建成功事件
           sendEvent(cellId, 'cellCreated', { cellId: newCell?.id });
